@@ -9,6 +9,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,autoPlay}:{i
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const lastProgress = useRef(0);
+  const controlsTimer = useRef<number | null>(null);
   const { fallback, error, startFallback } = useHlsFallback(item, videoRef);
   const [playing,setPlaying] = useState(false);
   const [current,setCurrent] = useState(0);
@@ -17,6 +18,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,autoPlay}:{i
   const [muted,setMuted] = useState(false);
   const [pip,setPip] = useState(false);
   const [pipSupported,setPipSupported] = useState(false);
+  const [controlsVisible,setControlsVisible] = useState(true);
 
   useEffect(()=>{
     const video=videoRef.current;
@@ -32,7 +34,22 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,autoPlay}:{i
     };
   },[]);
 
-  function toggle(){const v=videoRef.current;if(!v)return; if(v.paused)void v.play(); else v.pause();}
+  useEffect(()=>()=>{if(controlsTimer.current!==null)window.clearTimeout(controlsTimer.current);},[]);
+
+  function usesTouchControls(){return window.matchMedia('(hover: none), (pointer: coarse)').matches;}
+  function revealControls(){
+    if(controlsTimer.current!==null){window.clearTimeout(controlsTimer.current);controlsTimer.current=null;}
+    setControlsVisible(true);
+  }
+  function scheduleControlsHide(){
+    if(controlsTimer.current!==null)window.clearTimeout(controlsTimer.current);
+    const video=videoRef.current;
+    if(!usesTouchControls()||!video||video.paused){controlsTimer.current=null;return;}
+    controlsTimer.current=window.setTimeout(()=>{setControlsVisible(false);controlsTimer.current=null;},2400);
+  }
+
+  function toggle(){const v=videoRef.current;if(!v)return;if(v.paused)void v.play();else v.pause();}
+  function handleVideoClick(){if(usesTouchControls()&&!controlsVisible){revealControls();return;}toggle();revealControls();}
   function seek(value:number){const v=videoRef.current;if(!v)return;v.currentTime=value;setCurrent(value);}
   function seekBy(seconds:number){const v=videoRef.current;if(!v)return;seek(Math.max(0,Math.min(v.duration || duration,current + seconds)));}
   function toggleMute(){const v=videoRef.current;if(!v)return;v.muted=!v.muted;setMuted(v.muted);}
@@ -40,16 +57,16 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,autoPlay}:{i
   async function fullscreen(){const container=containerRef.current;const video=videoRef.current;if(!container||!video)return;await toggleFullscreen(container,video);}
   async function togglePip(){const v=videoRef.current;if(!v||!pipSupported)return;if(document.pictureInPictureElement)await document.exitPictureInPicture();else await v.requestPictureInPicture().catch(()=>{});}
 
-  return <div className="player" ref={containerRef} onDoubleClick={()=>void fullscreen()}>
+  return <div className={`player${controlsVisible?' controls-visible':''}`} ref={containerRef} onDoubleClick={()=>void fullscreen()} onPointerDown={(event)=>{if(event.pointerType==='touch')revealControls();}} onPointerUp={scheduleControlsHide} onPointerCancel={scheduleControlsHide}>
     <video
       ref={videoRef}
       src={`/api/media/${item.id}/stream`}
       playsInline
       preload={autoPlay?'auto':'metadata'}
       autoPlay={autoPlay}
-      onClick={toggle}
-      onPlay={()=>setPlaying(true)}
-      onPause={(e)=>{setPlaying(false);const v=e.currentTarget;void api.progress(item.id,v.currentTime,v.duration||duration);}}
+      onClick={handleVideoClick}
+      onPlay={()=>{setPlaying(true);revealControls();scheduleControlsHide();}}
+      onPause={(e)=>{setPlaying(false);revealControls();const v=e.currentTarget;void api.progress(item.id,v.currentTime,v.duration||duration);}}
       onLoadedMetadata={(e)=>{
         const v=e.currentTarget;setDuration(v.duration||item.duration||0);
         const resume=item.progress_position||0;
