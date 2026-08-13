@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ArrowsOut, FastForward, Pause, PictureInPicture, Play, Rewind, SkipBack, SkipForward, SpeakerHigh, SpeakerSlash, SpinnerGap } from '@phosphor-icons/react';
 import { api } from '../api';
 import { useHlsFallback } from '../hooks/useHlsFallback';
+import { toggleFullscreen } from '../utils/fullscreen';
 import type { MediaItem } from '../types';
 
 export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,autoPlay}:{item:MediaItem;queue?:MediaItem[];queueIndex?:number;onEnded?:()=>void;onNext?:()=>void;onPrev?:()=>void;autoPlay?:boolean}) {
@@ -36,7 +37,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,autoPlay}:{i
   function seekBy(seconds:number){const v=videoRef.current;if(!v)return;seek(Math.max(0,Math.min(v.duration || duration,current + seconds)));}
   function toggleMute(){const v=videoRef.current;if(!v)return;v.muted=!v.muted;setMuted(v.muted);}
   function setVol(value:number){const v=videoRef.current;if(!v)return;v.volume=value;v.muted=false;setMuted(false);setVolume(value);}
-  async function fullscreen(){const el=containerRef.current;if(!el)return;if(document.fullscreenElement)await document.exitFullscreen();else await el.requestFullscreen();}
+  async function fullscreen(){const container=containerRef.current;const video=videoRef.current;if(!container||!video)return;await toggleFullscreen(container,video);}
   async function togglePip(){const v=videoRef.current;if(!v||!pipSupported)return;if(document.pictureInPictureElement)await document.exitPictureInPicture();else await v.requestPictureInPicture().catch(()=>{});}
 
   return <div className="player" ref={containerRef} onDoubleClick={()=>void fullscreen()}>
