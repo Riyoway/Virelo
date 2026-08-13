@@ -79,9 +79,13 @@ export function MediaContextMenu({
         <span>{item.title}</span>
       </div>
       <div className="media-context-menu-divider" />
-      <MenuItem ref={firstItemRef} icon={<Heart weight={favorite ? 'fill' : 'regular'} />} onClick={() => choose(onFavorite)}>
+      <MenuItem
+        ref={firstItemRef}
+        icon={<Heart weight={favorite ? 'fill' : 'regular'} />}
+        end={favorite && <Check className="media-context-menu-check" weight="bold" />}
+        onClick={() => choose(onFavorite)}
+      >
         {favorite ? 'Remove from favorites' : 'Add to favorites'}
-        {favorite && <Check className="media-context-menu-check" weight="bold" />}
       </MenuItem>
       <MenuItem icon={<Play weight="fill" />} onClick={() => choose(onPlay)}>
         {item.progress_position && item.progress_position > 10 && !item.progress_completed ? 'Resume playback' : 'Play now'}
@@ -92,9 +96,10 @@ export function MediaContextMenu({
   );
 }
 
-function MenuItem({ children, icon, onClick, ref }: { children: ReactNode; icon: ReactNode; onClick: () => void; ref?: React.Ref<HTMLButtonElement> }) {
+function MenuItem({ children, icon, end, onClick, ref }: { children: ReactNode; icon: ReactNode; end?: ReactNode; onClick: () => void; ref?: React.Ref<HTMLButtonElement> }) {
   return <button ref={ref} className="media-context-menu-item" role="menuitem" onClick={onClick}>
     <span className="media-context-menu-icon">{icon}</span>
-    <span>{children}</span>
+    <span className="media-context-menu-label">{children}</span>
+    {end && <span className="media-context-menu-end">{end}</span>}
   </button>;
 }
