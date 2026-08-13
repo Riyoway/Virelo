@@ -206,6 +206,18 @@ button, a, input { -webkit-tap-highlight-color:transparent; }
 .search-empty h2,.empty-state h2 { color:#fff; margin:18px 0 4px; letter-spacing:-.03em; }
 .search-empty p,.empty-state p { margin:0 0 20px; max-width:450px; color:#b8b8b8; line-height:1.55; }
 .empty-actions { display:flex; flex-wrap:wrap; justify-content:center; gap:8px; }
+.not-found-view { min-height:calc(100dvh - var(--topbar)); display:flex; flex-direction:column; align-items:center; justify-content:center; padding:48px 24px 120px; text-align:center; }
+.not-found-mark { width:64px; height:64px; display:grid; place-items:center; margin-bottom:20px; border:1px solid var(--line); border-radius:18px; background:var(--surface-2); color:#d7d7d7; }
+.not-found-mark svg { width:31px; height:31px; }
+.not-found-code { margin:0 0 8px; color:var(--color-brand); font-size:12px; font-weight:750; letter-spacing:.14em; }
+.not-found-view h1 { margin:0; color:#fff; font-size:clamp(30px,5vw,48px); line-height:1.05; letter-spacing:-.045em; }
+.not-found-view>p:not(.not-found-code) { max-width:430px; margin:14px 0 26px; color:var(--text-muted); font-size:15px; line-height:1.6; }
+.not-found-actions { display:flex; flex-wrap:wrap; justify-content:center; gap:10px; }
+.not-found-link { min-height:44px; display:inline-flex; align-items:center; justify-content:center; gap:8px; padding:0 17px; border:1px solid var(--line); border-radius:12px; background:var(--surface-2); color:#e5e5e5; font-size:14px; font-weight:650; text-decoration:none; transition:background-color var(--dur-short) var(--ease-out),border-color var(--dur-short) var(--ease-out),transform var(--dur-micro) var(--ease-out); }
+.not-found-link:hover { border-color:var(--line-strong); background:var(--surface-3); }
+.not-found-link:active { transform:scale(.98); }
+.not-found-link.primary { border-color:#fff; background:#fff; color:#080808; }
+.not-found-link svg { width:17px; height:17px; }
 .scan-progress { width:min(440px,100%); margin:0 0 22px; text-align:left; }
 .scan-progress-head { display:flex; align-items:center; justify-content:space-between; gap:16px; color:#c8c8c8; font-size:13px; }
 .scan-progress-head>span:first-child { display:flex; align-items:center; gap:8px; }

@@ -2,6 +2,7 @@ import { lazy, Suspense, type ComponentType, type LazyExoticComponent } from 're
 import { createRootRoute, createRoute, createRouter, Outlet } from '@tanstack/react-router';
 import { Header } from './components/Header';
 import { MobileNav } from './components/MobileNav';
+import { NotFoundView } from './views/NotFoundView';
 import type { SortKey } from './types';
 
 const HomeView = lazy(async () => ({ default: (await import('./views/HomeView')).HomeView }));
@@ -46,7 +47,7 @@ const WatchRouteView = withSuspense(WatchView);
 const DetailRouteView = withSuspense(DetailView);
 const ShortsRouteView = withSuspense(ShortsView);
 
-const rootRoute = createRootRoute({ component: Shell });
+const rootRoute = createRootRoute({ component: Shell, notFoundComponent: NotFoundView });
 const indexRoute = createRoute({ getParentRoute:()=>rootRoute, path:'/', component:HomeRouteView });
 const libraryRoute = createRoute({ getParentRoute:()=>rootRoute, path:'/library', component:LibraryRouteView });
 const settingsRoute = createRoute({ getParentRoute:()=>rootRoute, path:'/settings', component:SettingsRouteView });
