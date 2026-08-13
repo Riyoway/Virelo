@@ -306,6 +306,8 @@ export async function createVireloServer(config: RuntimeConfig) {
 export async function startServer(config: RuntimeConfig) {
   const { app, db, runScan, scanStatus } = await createVireloServer(config);
   await app.listen({ host: config.host, port: config.port });
+  const address = app.server.address();
+  const port = address && typeof address === 'object' ? address.port : config.port;
   void runScan();
-  return { app, db, scanStatus };
+  return { app, db, port, scanStatus };
 }

@@ -258,6 +258,8 @@ function ShortsClip({ item, active, onSkip, pipOn, onPip }: { item: ShortItem; a
           className={`short-video${isLandscape ? ' landscape' : ''}`}
           src={`/api/media/${item.id}/stream`}
           preload={active ? 'auto' : 'metadata'}
+          autoPlay={active}
+          muted={muted}
           playsInline
           onLoadedMetadata={(e) => {
             const nextDuration = Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : item.duration || 0;

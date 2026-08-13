@@ -10,6 +10,8 @@ export interface CliOptions {
   version: boolean;
 }
 
+export const DEFAULT_PORT = 41777;
+
 export class CliUsageError extends Error {
   constructor(message: string) {
     super(message);
@@ -24,10 +26,12 @@ const VALUE_OPTIONS: ReadonlyMap<string, 'media' | 'data' | 'host' | 'port'> = n
   ['--port', 'port'], ['-p', 'port']
 ] as const);
 
+const FLAG_OPTIONS = new Set(['--random-port']);
+
 export function parseCliArgs(args: string[], cwd = process.cwd()): CliOptions {
   let data: string | undefined;
   let host = '127.0.0.1';
-  let port = 4177;
+  let port = DEFAULT_PORT;
   let openBrowser = true;
   let help = false;
   let version = false;
@@ -38,6 +42,7 @@ export function parseCliArgs(args: string[], cwd = process.cwd()): CliOptions {
     if (argument === '--help' || argument === '-h') { help = true; continue; }
     if (argument === '--version' || argument === '-v') { version = true; continue; }
     if (argument === '--no-open') { openBrowser = false; continue; }
+    if (FLAG_OPTIONS.has(argument)) { port = 0; continue; }
 
     const equalsIndex = argument.indexOf('=');
     const option = equalsIndex > 0 ? argument.slice(0, equalsIndex) : argument;
@@ -55,8 +60,8 @@ export function parseCliArgs(args: string[], cwd = process.cwd()): CliOptions {
     else if (optionType === 'host') host = value.trim();
     else {
       port = Number(value);
-      if (!Number.isInteger(port) || port < 1 || port > 65535) {
-        throw new CliUsageError('Port must be an integer between 1 and 65535.');
+      if (!Number.isInteger(port) || port < 0 || port > 65535) {
+        throw new CliUsageError('Port must be an integer between 0 and 65535. Use 0 to select an available port automatically.');
       }
     }
   }

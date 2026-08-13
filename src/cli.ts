@@ -2,7 +2,7 @@
 import { stat } from 'node:fs/promises';
 import open from 'open';
 import { defaultDataDir, ensureDataDirs } from './config.js';
-import { CliUsageError, parseCliArgs } from './cli-options.js';
+import { CliUsageError, DEFAULT_PORT, parseCliArgs } from './cli-options.js';
 import { VIRELO_VERSION } from './version.js';
 
 function usage() {
@@ -16,7 +16,8 @@ Options:
   -m, --media <path>  Use a media directory (repeatable)
   -d, --data <path>   Store data and cache in this directory (default: ~/.virelo)
   -H, --host <host>   Bind address (default: 127.0.0.1)
-  -p, --port <port>   HTTP port (default: 4177)
+  -p, --port <port>   HTTP port (default: ${DEFAULT_PORT}; use 0 for an available port)
+      --random-port   Select an available HTTP port automatically
       --no-open       Do not open a browser
   -h, --help          Show help
   -v, --version       Show version
@@ -53,10 +54,10 @@ async function main() {
   const dataDir = options.dataDir ?? defaultDataDir();
   ensureDataDirs(dataDir);
   const { startServer } = await loadServer();
-  const { app } = await startServer({ dataDir, host: options.host, port: options.port, mediaPaths: options.mediaPaths });
+  const { app, port } = await startServer({ dataDir, host: options.host, port: options.port, mediaPaths: options.mediaPaths });
   const browserHost = options.host === '0.0.0.0' || options.host === '::' ? '127.0.0.1' : options.host;
-  const url = `http://${browserHost}:${options.port}`;
-  console.log(`\nVirelo is ready\n  Local:  ${url}\n  Media:  ${options.mediaPaths.join(', ')}\n  Data:   ${dataDir}${options.host === '0.0.0.0' ? `\n  LAN:    http://<your-lan-ip>:${options.port}` : ''}\n`);
+  const url = `http://${browserHost}:${port}`;
+  console.log(`\nVirelo is ready\n  Local:  ${url}\n  Media:  ${options.mediaPaths.join(', ')}\n  Data:   ${dataDir}${options.host === '0.0.0.0' ? `\n  LAN:    http://<your-lan-ip>:${port}` : ''}\n`);
   if (options.openBrowser) void open(url).catch(() => undefined);
 
   const shutdown = async () => {

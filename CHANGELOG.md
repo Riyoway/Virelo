@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Use fixed port `41777` by default for a stable PWA origin, with `--port 0` and `--random-port` available when a conflict occurs.
+
 ## 0.1.0 — 2026-08-08
 
 - Initial Virelo release.
