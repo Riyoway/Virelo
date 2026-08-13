@@ -482,7 +482,7 @@ button, a, input { -webkit-tap-highlight-color:transparent; }
 }
 
 /* Shorts feed */
-.shorts-view { --shorts-desktop-gutter:clamp(24px,2vw,32px); position:relative; height:calc(100dvh - var(--topbar)); overflow:hidden; background:#000; }
+.shorts-view { position:relative; height:calc(100dvh - var(--topbar)); overflow:hidden; background:#000; }
 .shorts-scroller { height:100%; overflow-y:auto; scroll-snap-type:y mandatory; scrollbar-width:none; overscroll-behavior-y:contain; }
 .shorts-scroller::-webkit-scrollbar { display:none; }
 .short-slot { height:calc(100dvh - var(--topbar)); scroll-snap-align:start; scroll-snap-stop:always; position:relative; display:grid; place-items:center; background:var(--page); }
@@ -555,10 +555,11 @@ button, a, input { -webkit-tap-highlight-color:transparent; }
   .short-actions button span { display:block; }
 }
 
-/* Desktop Shorts: keep the feed anchored to the left edge instead of centering it. */
+/* Desktop Shorts: center the feed; keep only the top controls aligned to the frame. */
 @media (min-width: 901px) {
-  .short-slot { place-items:center start; padding-left:var(--shorts-desktop-gutter); }
-  .short-info { left:var(--shorts-desktop-gutter); width:min(340px,30vw); }
+  .short-slot { place-items:center; padding-left:0; }
+  .short-info { left:calc(50% - var(--short-frame-width) / 2 - min(340px,30vw) - 28px); width:min(340px,30vw); }
+  .short-top-actions { left:16px; }
 }
 
 /* Settings navigation collapses into a horizontally scrollable tab rail */
