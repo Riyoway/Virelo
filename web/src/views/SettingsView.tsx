@@ -37,13 +37,9 @@ export function SettingsView(){
   const add=useMutation({mutationFn:()=>api.addLibrary(path),onSuccess:()=>{setPath('');void client.invalidateQueries({queryKey:['libraries']});void client.invalidateQueries({queryKey:['scan']});}});
   const remove=useMutation({mutationFn:(id:number)=>api.removeLibrary(id),onSuccess:()=>{void client.invalidateQueries({queryKey:['libraries']});void client.invalidateQueries({queryKey:['home']});}});
   if(!form)return <div className="settings-loading skeleton"/>;
+  const hasChanges=JSON.stringify(form)!==JSON.stringify(settingsQuery.data)||apiKey.length>0;
   return <div className="content-view settings-view">
-    <header className="settings-heading"><h1>Settings</h1></header>
-
-    <div className="settings-save-bar">
-      <div aria-live="polite">{save.isSuccess&&<span className="settings-saved"><CheckCircle/> Saved</span>}</div>
-      <Button isPending={save.isPending} onPress={()=>save.mutate()}>Save settings</Button>
-    </div>
+    <header className="settings-heading"><h1>Settings</h1><div className="settings-heading-actions"><span aria-live="polite">{save.isSuccess&&!hasChanges&&<span className="settings-saved"><CheckCircle/> Saved</span>}</span><Button isPending={save.isPending} isDisabled={!hasChanges} onPress={()=>save.mutate()}>Save settings</Button></div></header>
     {save.error&&<p className="error-copy settings-save-error">{save.error.message}</p>}
 
     <div className="settings-layout">
