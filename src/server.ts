@@ -1,0 +1,311 @@
+import Fastify from 'fastify';
+import fastifyStatic from '@fastify/static';
+import chokidar, { type FSWatcher } from 'chokidar';
+import { createReadStream, existsSync } from 'node:fs';
+import { stat } from 'node:fs/promises';
+import { basename, extname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { VireloDB } from './db.js';
+import { ensureDataDirs, type RuntimeConfig } from './config.js';
+import { scanAll } from './scanner.js';
+import { refreshMissingTmdbMetadata, refreshTmdbMetadata } from './metadata.js';
+import { hasFfmpeg, hasFfprobe } from './ffmpeg.js';
+import { startHlsTranscode, transcodeStatus, stopAllTranscodes } from './transcode.js';
+import type { AppSettings, MediaKind, ScanStatus, SortKey } from './types.js';
+import { VIRELO_VERSION } from './version.js';
+
+const SORT_KEYS: SortKey[] = ['title', 'newest', 'oldest', 'year', 'duration', 'random'];
+
+function contentType(path: string) {
+  const ext = extname(path).toLowerCase();
+  return ({
+    '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
+    '.mkv': 'video/x-matroska', '.avi': 'video/x-msvideo', '.wmv': 'video/x-ms-wmv', '.mpeg': 'video/mpeg',
+    '.mpg': 'video/mpeg', '.ts': 'video/mp2t', '.m2ts': 'video/mp2t', '.flv': 'video/x-flv', '.ogv': 'video/ogg',
+    '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.avif': 'image/avif'
+  } as Record<string,string>)[ext] || 'application/octet-stream';
+}
+
+function publicSettings(settings: AppSettings) {
+  return {
+    ...settings,
+    tmdbApiKey: '',
+    tmdbApiKeyConfigured: Boolean(settings.tmdbApiKey)
+  };
+}
+
+
+function hostWithoutPort(value: string) {
+  if (value.startsWith('[')) return value.slice(1, value.indexOf(']'));
+  return value.split(':')[0].toLowerCase();
+}
+
+function isPrivateHost(host: string, configHost: string) {
+  const normalized = host.toLowerCase();
+  const trusted = (process.env.VIRELO_TRUSTED_HOSTS || '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean);
+  if (trusted.includes(normalized)) return true;
+  if (['localhost', '127.0.0.1', '::1'].includes(normalized) || normalized.endsWith('.local') || /^[a-z0-9-]+$/i.test(normalized)) return true;
+  if (configHost !== '0.0.0.0' && configHost !== '::' && normalized === configHost.toLowerCase()) return true;
+  if (/^127\./.test(normalized) || /^10\./.test(normalized) || /^192\.168\./.test(normalized) || /^169\.254\./.test(normalized)) return true;
+  const ipv4 = normalized.match(/^172\.(\d{1,3})\./);
+  if (ipv4 && Number(ipv4[1]) >= 16 && Number(ipv4[1]) <= 31) return true;
+  const cgnat = normalized.match(/^100\.(\d{1,3})\./);
+  if (cgnat && Number(cgnat[1]) >= 64 && Number(cgnat[1]) <= 127) return true;
+  if (/^(fc|fd|fe[89ab])/i.test(normalized)) return true;
+  return false;
+}
+
+export async function createVireloServer(config: RuntimeConfig) {
+  ensureDataDirs(config.dataDir);
+  const db = new VireloDB(config.dataDir);
+  const app = Fastify({ logger: { level: process.env.VIRELO_LOG_LEVEL || 'info' }, bodyLimit: 1024 * 1024 });
+  app.addHook('onRequest', async (request, reply) => {
+    const hostHeader = request.headers.host || '';
+    const hostname = hostWithoutPort(hostHeader);
+    if (!hostname || !isPrivateHost(hostname, config.host)) return reply.code(403).send({ error: 'Untrusted Host header.' });
+    const origin = request.headers.origin;
+    if (origin) {
+      try {
+        const originUrl = new URL(origin);
+        if (originUrl.host.toLowerCase() !== hostHeader.toLowerCase()) return reply.code(403).send({ error: 'Cross-origin request blocked.' });
+      } catch {
+        return reply.code(403).send({ error: 'Invalid Origin header.' });
+      }
+    }
+  });
+  app.addHook('onSend', async (_request, reply, payload) => {
+    reply.headers({
+      'X-Content-Type-Options': 'nosniff',
+      'X-Frame-Options': 'DENY',
+      'Referrer-Policy': 'no-referrer',
+      'Cross-Origin-Resource-Policy': 'same-origin',
+      'Content-Security-Policy': "default-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self' blob:; font-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+    });
+    return payload;
+  });
+  const webRoot = fileURLToPath(new URL('./web', import.meta.url));
+  let watcher: FSWatcher | null = null;
+  let watchDebounce: NodeJS.Timeout | null = null;
+
+  if (config.mediaPaths.length) {
+    for (const mediaPath of config.mediaPaths) {
+      try {
+        const info = await stat(mediaPath);
+        if (info.isDirectory()) db.addLibrary(mediaPath, basename(mediaPath) || mediaPath);
+      } catch {
+        app.log.warn({ mediaPath }, 'Skipping unreadable media directory');
+      }
+    }
+  }
+
+  const scanStatus: ScanStatus = {
+    running: false, startedAt: null, finishedAt: null, total: 0, scanned: 0, added: 0, updated: 0, skipped: 0, errors: 0, message: 'Idle'
+  };
+
+  async function runScan() {
+    if (scanStatus.running) return false;
+    Object.assign(scanStatus, { running: true, startedAt: Date.now(), finishedAt: null, total: 0, scanned: 0, added: 0, updated: 0, skipped: 0, errors: 0, message: 'Starting scan' });
+    void (async () => {
+      try {
+        await scanAll(db, config.dataDir, scanStatus);
+        const settings = db.getSettings();
+        if (settings.externalMetadataEnabled && settings.tmdbApiKey) {
+          scanStatus.message = 'Fetching permitted metadata';
+          const result = await refreshMissingTmdbMetadata(db, config.dataDir, (done, total) => {
+            scanStatus.message = `Fetching permitted metadata · ${done}/${total}`;
+          });
+          scanStatus.message = result.attempted ? `Scan complete · ${result.updated} metadata matches` : 'Scan complete';
+        } else {
+          scanStatus.message = 'Scan complete';
+        }
+      } catch (error) {
+        scanStatus.errors++;
+        scanStatus.message = error instanceof Error ? error.message : 'Scan failed';
+        app.log.error(error);
+      } finally {
+        scanStatus.running = false;
+        scanStatus.finishedAt = Date.now();
+      }
+    })();
+    return true;
+  }
+
+  async function refreshWatcher() {
+    if (watcher) { await watcher.close(); watcher = null; }
+    if (!db.getSettings().libraryWatchEnabled) return;
+    const paths = db.visibleLibraries().map((l) => l.path).filter((p) => existsSync(p));
+    if (!paths.length) return;
+    watcher = chokidar.watch(paths, { ignoreInitial: true, awaitWriteFinish: { stabilityThreshold: 1200, pollInterval: 200 } });
+    const schedule = () => {
+      if (watchDebounce) clearTimeout(watchDebounce);
+      watchDebounce = setTimeout(() => { void runScan(); }, 1400);
+    };
+    watcher.on('add', schedule).on('change', schedule).on('unlink', schedule).on('addDir', schedule).on('unlinkDir', schedule);
+  }
+
+  app.get('/api/health', async () => ({ ok: true, version: VIRELO_VERSION, ffmpeg: await hasFfmpeg(), ffprobe: await hasFfprobe(), scan: scanStatus }));
+  app.get('/api/settings', async () => publicSettings(db.getSettings()));
+  app.post<{ Body: Partial<AppSettings> & { tmdbApiKey?: string; clearTmdbApiKey?: boolean } }>('/api/settings', async (request) => {
+    const body = request.body || {};
+    const patch: Partial<AppSettings> = {};
+    for (const key of ['externalMetadataEnabled','externalImagesEnabled','metadataProvider','metadataLanguage','libraryWatchEnabled','shortsIncludeLandscapes','queueBehavior','showAllLibraries'] as const) {
+      if (body[key] !== undefined) (patch as any)[key] = body[key];
+    }
+    if (body.clearTmdbApiKey === true) patch.tmdbApiKey = '';
+    else if (typeof body.tmdbApiKey === 'string' && body.tmdbApiKey.trim()) patch.tmdbApiKey = body.tmdbApiKey.trim();
+    db.updateSettings(patch);
+    await refreshWatcher();
+    const updatedSettings = db.getSettings();
+    if (updatedSettings.externalMetadataEnabled && updatedSettings.tmdbApiKey) void runScan();
+    return publicSettings(updatedSettings);
+  });
+
+  app.get('/api/libraries', async () => db.visibleLibraries());
+  app.post<{ Body: { path?: string; label?: string } }>('/api/libraries', async (request, reply) => {
+    const raw = request.body?.path?.trim();
+    if (!raw) return reply.code(400).send({ error: 'path is required' });
+    const path = resolve(raw);
+    try {
+      const info = await stat(path);
+      if (!info.isDirectory()) throw new Error('Not a directory');
+    } catch {
+      return reply.code(400).send({ error: 'Directory does not exist or cannot be read.' });
+    }
+    const library = db.addLibrary(path, request.body?.label?.trim() || basename(path) || path);
+    await refreshWatcher();
+    await runScan();
+    return library;
+  });
+  app.delete<{ Params: { id: string } }>('/api/libraries/:id', async (request, reply) => {
+    const id = Number(request.params.id);
+    if (!Number.isInteger(id)) return reply.code(400).send({ error: 'invalid id' });
+    db.removeLibrary(id);
+    await refreshWatcher();
+    return { ok: true };
+  });
+
+  app.post('/api/scan', async () => ({ started: await runScan(), status: scanStatus }));
+  app.get('/api/scan/status', async () => scanStatus);
+  app.get('/api/home', async () => db.getHome());
+  app.get<{ Querystring: { search?: string; kind?: MediaKind; limit?: string; offset?: string; libraryId?: string; folder?: string; sort?: string; liked?: string } }>('/api/media', async (request) => {
+    const q = request.query;
+    return db.listMedia({
+      search: q.search?.slice(0, 200),
+      kind: q.kind,
+      limit: q.limit ? Number(q.limit) : 100,
+      offset: q.offset ? Number(q.offset) : 0,
+      libraryId: q.libraryId ? Number(q.libraryId) : undefined,
+      folder: q.folder !== undefined ? q.folder.slice(0, 500) : undefined,
+      sort: (SORT_KEYS as string[]).includes(q.sort ?? '') ? q.sort as SortKey : 'title',
+      liked: q.liked === '1' || q.liked === 'true'
+    });
+  });
+  app.get('/api/folders', async () => db.getFolders());
+  app.get<{ Params: { id: string } }>('/api/media/:id', async (request, reply) => {
+    const media = db.getMedia(Number(request.params.id));
+    if (!media) return reply.code(404).send({ error: 'Not found' });
+    return media;
+  });
+  app.post<{ Params: { id: string }; Body: { position?: number; duration?: number } }>('/api/media/:id/progress', async (request, reply) => {
+    const id = Number(request.params.id);
+    if (!db.getMedia(id)) return reply.code(404).send({ error: 'Not found' });
+    db.setProgress(id, Number(request.body?.position) || 0, Number(request.body?.duration) || 0);
+    return { ok: true };
+  });
+  app.post<{ Params: { id: string } }>('/api/media/:id/transcode/start', async (request, reply) => {
+    const media = db.getMedia(Number(request.params.id));
+    if (!media || !existsSync(media.path)) return reply.code(404).send({ error: 'Media file not found' });
+    return startHlsTranscode(config.dataDir, media.id, media.path);
+  });
+  app.get<{ Params: { id: string } }>('/api/media/:id/transcode/status', async (request) => transcodeStatus(config.dataDir, Number(request.params.id)));
+
+  app.get<{ Querystring: { limit?: string; offset?: string } }>('/api/shorts', async (request) => {
+    const q = request.query;
+    return db.getShorts({
+      limit: q.limit ? Number(q.limit) : 50,
+      offset: q.offset ? Number(q.offset) : 0,
+      includeLandscapes: db.getSettings().shortsIncludeLandscapes
+    });
+  });
+  app.post<{ Params: { id: string }; Body: { liked?: boolean } }>('/api/media/:id/like', async (request, reply) => {
+    const id = Number(request.params.id);
+    if (!db.getMedia(id)) return reply.code(404).send({ error: 'Not found' });
+    const liked = request.body?.liked === true;
+    db.setLike(id, liked);
+    return { ok: true, liked };
+  });
+
+  app.post<{ Params: { id: string } }>('/api/media/:id/metadata/refresh', async (request, reply) => {
+    try { return await refreshTmdbMetadata(db, config.dataDir, Number(request.params.id)); }
+    catch (error) { return reply.code(400).send({ error: error instanceof Error ? error.message : 'Metadata refresh failed' }); }
+  });
+
+  app.get<{ Params: { id: string; kind: string } }>('/api/media/:id/artwork/:kind', async (request, reply) => {
+    const media = db.getMedia(Number(request.params.id));
+    if (!media) return reply.code(404).send();
+    const path = request.params.kind === 'poster' ? media.poster_path : request.params.kind === 'backdrop' ? media.backdrop_path : media.thumbnail_path;
+    if (!path || !existsSync(path)) return reply.code(404).send();
+    reply.header('Cache-Control', 'public, max-age=86400, immutable').type(contentType(path));
+    return reply.send(createReadStream(path));
+  });
+
+  app.get<{ Params: { id: string } }>('/api/media/:id/stream', async (request, reply) => {
+    const media = db.getMedia(Number(request.params.id));
+    if (!media || !existsSync(media.path)) return reply.code(404).send({ error: 'Media file not found' });
+    const info = await stat(media.path);
+    const total = info.size;
+    const range = request.headers.range;
+    reply.header('Accept-Ranges', 'bytes').header('Cache-Control', 'private, max-age=0').type(contentType(media.path));
+    if (!range) {
+      reply.header('Content-Length', total);
+      return reply.send(createReadStream(media.path));
+    }
+    if (range.includes(',')) return reply.code(416).header('Content-Range', `bytes */${total}`).send();
+    const match = /^bytes=(\d*)-(\d*)$/.exec(range.trim());
+    if (!match || (!match[1] && !match[2])) return reply.code(416).header('Content-Range', `bytes */${total}`).send();
+    let start: number;
+    let end: number;
+    if (!match[1]) {
+      const suffixLength = Number(match[2]);
+      if (!Number.isFinite(suffixLength) || suffixLength <= 0) return reply.code(416).header('Content-Range', `bytes */${total}`).send();
+      start = Math.max(total - Math.trunc(suffixLength), 0);
+      end = total - 1;
+    } else {
+      start = Number(match[1]);
+      end = match[2] ? Math.min(Number(match[2]), total - 1) : total - 1;
+    }
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start || start >= total) {
+      return reply.code(416).header('Content-Range', `bytes */${total}`).send();
+    }
+    const chunkSize = end - start + 1;
+    reply.code(206).headers({
+      'Content-Range': `bytes ${start}-${end}/${total}`,
+      'Content-Length': chunkSize
+    });
+    return reply.send(createReadStream(media.path, { start, end }));
+  });
+
+  await app.register(fastifyStatic, { root: resolve(config.dataDir, 'cache', 'hls'), prefix: '/hls/', wildcard: true, decorateReply: false, cacheControl: false });
+  await app.register(fastifyStatic, { root: webRoot, prefix: '/', wildcard: false, decorateReply: true });
+  app.setNotFoundHandler(async (request, reply) => {
+    if (request.url.startsWith('/api/')) return reply.code(404).send({ error: 'Not found' });
+    return reply.type('text/html').sendFile('index.html');
+  });
+
+  app.addHook('onClose', async () => {
+    if (watchDebounce) clearTimeout(watchDebounce);
+    if (watcher) await watcher.close();
+    stopAllTranscodes();
+    db.close();
+  });
+
+  await refreshWatcher();
+  return { app, db, runScan, scanStatus };
+}
+
+export async function startServer(config: RuntimeConfig) {
+  const { app, db, runScan, scanStatus } = await createVireloServer(config);
+  await app.listen({ host: config.host, port: config.port });
+  void runScan();
+  return { app, db, scanStatus };
+}

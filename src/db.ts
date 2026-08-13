@@ -1,0 +1,344 @@
+import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import type { AppSettings, FolderEntry, Library, MediaRecord, MediaKind, ShortsFeed, ShortsItem, SortKey } from './types.js';
+
+const DEFAULT_SETTINGS: AppSettings = {
+  externalMetadataEnabled: false,
+  externalImagesEnabled: false,
+  metadataProvider: 'tmdb',
+  metadataLanguage: 'ja-JP',
+  tmdbApiKey: '',
+  libraryWatchEnabled: true,
+  shortsIncludeLandscapes: false,
+  queueBehavior: 'auto',
+  showAllLibraries: false
+};
+
+const SORT_ORDER: Record<SortKey, string> = {
+  title: 'm.sort_title COLLATE NOCASE ASC, m.id ASC',
+  newest: 'm.added_at DESC, m.id DESC',
+  oldest: 'm.added_at ASC, m.id ASC',
+  year: 'm.year IS NULL, m.year DESC, m.sort_title COLLATE NOCASE ASC',
+  duration: 'm.duration IS NULL, m.duration DESC, m.sort_title COLLATE NOCASE ASC',
+  random: 'RANDOM()'
+};
+
+export class VireloDB {
+  readonly db: DatabaseSync;
+  private sessionPinned = new Set<number>();
+
+  constructor(dataDir: string) {
+    this.db = new DatabaseSync(resolve(dataDir, 'virelo.db'));
+    this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
+    this.migrate();
+  }
+
+  private migrate() {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS libraries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        path TEXT NOT NULL UNIQUE,
+        label TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS media (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        library_id INTEGER NOT NULL,
+        path TEXT NOT NULL UNIQUE,
+        filename TEXT NOT NULL,
+        title TEXT NOT NULL,
+        sort_title TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        series_title TEXT,
+        season INTEGER,
+        episode INTEGER,
+        year INTEGER,
+        duration REAL,
+        width INTEGER,
+        height INTEGER,
+        video_codec TEXT,
+        audio_codec TEXT,
+        container TEXT,
+        folder TEXT NOT NULL DEFAULT '',
+        size INTEGER NOT NULL,
+        mtime INTEGER NOT NULL,
+        thumbnail_path TEXT,
+        poster_path TEXT,
+        backdrop_path TEXT,
+        overview TEXT,
+        genres TEXT,
+        external_id TEXT,
+        added_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY(library_id) REFERENCES libraries(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_media_library ON media(library_id);
+      CREATE INDEX IF NOT EXISTS idx_media_kind ON media(kind);
+      CREATE INDEX IF NOT EXISTS idx_media_title ON media(sort_title);
+      CREATE INDEX IF NOT EXISTS idx_media_added ON media(added_at DESC);
+      CREATE TABLE IF NOT EXISTS progress (
+        media_id INTEGER PRIMARY KEY,
+        position REAL NOT NULL DEFAULT 0,
+        duration REAL NOT NULL DEFAULT 0,
+        completed INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY(media_id) REFERENCES media(id) ON DELETE CASCADE
+      );
+      CREATE TABLE IF NOT EXISTS likes (
+        media_id INTEGER PRIMARY KEY,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY(media_id) REFERENCES media(id) ON DELETE CASCADE
+      );
+    `);
+    this.migrateFolderColumn();
+  }
+
+  private migrateFolderColumn() {
+    const columns = this.db.prepare('PRAGMA table_info(media)').all() as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === 'folder')) {
+      this.db.exec(`ALTER TABLE media ADD COLUMN folder TEXT NOT NULL DEFAULT ''`);
+    }
+    const pending = this.db.prepare(`
+      SELECT m.id, m.path, l.path AS library_path FROM media m JOIN libraries l ON l.id=m.library_id WHERE m.folder='' AND m.path != l.path
+    `).all() as Array<{ id: number; path: string; library_path: string }>;
+    if (!pending.length) return;
+    const update = this.db.prepare('UPDATE media SET folder=? WHERE id=?');
+    for (const row of pending) {
+      const parent = dirname(row.path);
+      let folder: string;
+      try { folder = relative(row.library_path, parent).replaceAll('\\', '/'); } catch { folder = ''; }
+      if (!folder || folder.startsWith('..')) folder = '';
+      update.run(folder, row.id);
+    }
+  }
+
+  close() { this.db.close(); }
+
+  getSettings(): AppSettings {
+    const rows = this.db.prepare('SELECT key, value FROM settings').all() as Array<{key: string; value: string}>;
+    const result: AppSettings = { ...DEFAULT_SETTINGS };
+    for (const row of rows) {
+      if (!(row.key in result)) continue;
+      try { (result as unknown as Record<string, unknown>)[row.key] = JSON.parse(row.value); } catch { /* ignore corrupt setting */ }
+    }
+    return result;
+  }
+
+  updateSettings(patch: Partial<AppSettings>) {
+    const allowed = new Set(Object.keys(DEFAULT_SETTINGS));
+    const stmt = this.db.prepare(`INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`);
+    this.db.exec('BEGIN');
+    try {
+      for (const [key, value] of Object.entries(patch)) {
+        if (allowed.has(key)) stmt.run(key, JSON.stringify(value));
+      }
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  listLibraries(): Library[] {
+    return this.db.prepare('SELECT * FROM libraries ORDER BY created_at ASC').all() as unknown as Library[];
+  }
+
+  private static pathInside(target: string, root: string): boolean {
+    let rel: string;
+    try { rel = relative(root, target); } catch { return false; }
+    if (rel === '') return true;
+    if (rel.startsWith('..') || isAbsolute(rel)) return false;
+    return true;
+  }
+
+  visibleLibraries(): Library[] {
+    const settings = this.getSettings();
+    if (settings.showAllLibraries) return this.listLibraries();
+    const cwd = process.cwd();
+    return this.listLibraries().filter((l) => this.sessionPinned.has(l.id) || VireloDB.pathInside(l.path, cwd));
+  }
+
+  private visibleIdClause(): { sql: string; params: SQLInputValue[] } {
+    const ids = this.visibleLibraries().map((l) => l.id);
+    return ids.length
+      ? { sql: `m.library_id IN (${ids.map(() => '?').join(',')})`, params: ids }
+      : { sql: '0=1', params: [] };
+  }
+
+  addLibrary(path: string, label: string): Library {
+    const now = Date.now();
+    this.db.prepare('INSERT OR IGNORE INTO libraries(path,label,created_at) VALUES(?,?,?)').run(path, label, now);
+    const library = this.db.prepare('SELECT * FROM libraries WHERE path=?').get(path) as unknown as Library;
+    this.sessionPinned.add(library.id);
+    return library;
+  }
+
+  removeLibrary(id: number) {
+    this.db.prepare('DELETE FROM libraries WHERE id=?').run(id);
+  }
+
+  getMediaByPath(path: string): MediaRecord | undefined {
+    return this.db.prepare('SELECT * FROM media WHERE path=?').get(path) as unknown as MediaRecord | undefined;
+  }
+
+  getMedia(id: number): MediaRecord | undefined {
+    return this.db.prepare(`
+      SELECT m.*, p.position AS progress_position, p.duration AS progress_duration, p.completed AS progress_completed,
+        (l.media_id IS NOT NULL) AS liked
+      FROM media m
+      LEFT JOIN progress p ON p.media_id=m.id
+      LEFT JOIN likes l ON l.media_id=m.id
+      WHERE m.id=?
+    `).get(id) as unknown as MediaRecord | undefined;
+  }
+
+  upsertMedia(input: Omit<MediaRecord, 'id' | 'added_at' | 'updated_at'>): MediaRecord {
+    const now = Date.now();
+    this.db.prepare(`
+      INSERT INTO media(
+        library_id,path,filename,title,sort_title,kind,series_title,season,episode,year,duration,width,height,
+        video_codec,audio_codec,container,folder,size,mtime,thumbnail_path,poster_path,backdrop_path,overview,genres,external_id,added_at,updated_at
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(path) DO UPDATE SET
+        library_id=excluded.library_id, filename=excluded.filename, title=excluded.title, sort_title=excluded.sort_title,
+        kind=excluded.kind, series_title=excluded.series_title, season=excluded.season, episode=excluded.episode, year=excluded.year,
+        duration=COALESCE(excluded.duration,media.duration), width=COALESCE(excluded.width,media.width), height=COALESCE(excluded.height,media.height),
+        video_codec=COALESCE(excluded.video_codec,media.video_codec), audio_codec=COALESCE(excluded.audio_codec,media.audio_codec),
+        container=COALESCE(excluded.container,media.container), folder=excluded.folder, size=excluded.size, mtime=excluded.mtime,
+        thumbnail_path=COALESCE(excluded.thumbnail_path,media.thumbnail_path), poster_path=COALESCE(media.poster_path,excluded.poster_path),
+        backdrop_path=COALESCE(media.backdrop_path,excluded.backdrop_path), overview=COALESCE(media.overview,excluded.overview),
+        genres=COALESCE(media.genres,excluded.genres), external_id=COALESCE(media.external_id,excluded.external_id), updated_at=excluded.updated_at
+    `).run(
+      input.library_id,input.path,input.filename,input.title,input.sort_title,input.kind,input.series_title,input.season,input.episode,input.year,
+      input.duration,input.width,input.height,input.video_codec,input.audio_codec,input.container,input.folder ?? '',input.size,input.mtime,input.thumbnail_path,
+      input.poster_path,input.backdrop_path,input.overview,input.genres,input.external_id,now,now
+    );
+    return this.getMediaByPath(input.path)!;
+  }
+
+  updateTechnicalMetadata(id: number, data: Partial<Pick<MediaRecord,'duration'|'width'|'height'|'video_codec'|'audio_codec'|'container'|'thumbnail_path'>>) {
+    this.db.prepare(`UPDATE media SET duration=COALESCE(?,duration),width=COALESCE(?,width),height=COALESCE(?,height),video_codec=COALESCE(?,video_codec),audio_codec=COALESCE(?,audio_codec),container=COALESCE(?,container),thumbnail_path=COALESCE(?,thumbnail_path),updated_at=? WHERE id=?`)
+      .run(data.duration ?? null,data.width ?? null,data.height ?? null,data.video_codec ?? null,data.audio_codec ?? null,data.container ?? null,data.thumbnail_path ?? null,Date.now(),id);
+  }
+
+  updateExternalMetadata(id: number, data: Partial<Pick<MediaRecord,'title'|'overview'|'genres'|'poster_path'|'backdrop_path'|'external_id'|'year'>>) {
+    const current = this.getMedia(id);
+    if (!current) return;
+    this.db.prepare(`UPDATE media SET title=?,sort_title=?,overview=?,genres=?,poster_path=?,backdrop_path=?,external_id=?,year=?,updated_at=? WHERE id=?`)
+      .run(data.title ?? current.title,(data.title ?? current.title).toLowerCase(),data.overview ?? current.overview,data.genres ?? current.genres,data.poster_path ?? current.poster_path,data.backdrop_path ?? current.backdrop_path,data.external_id ?? current.external_id,data.year ?? current.year,Date.now(),id);
+  }
+
+  deleteMissingForLibrary(libraryId: number, existingPaths: Set<string>) {
+    const rows = this.db.prepare('SELECT id,path FROM media WHERE library_id=?').all(libraryId) as Array<{id:number;path:string}>;
+    const del = this.db.prepare('DELETE FROM media WHERE id=?');
+    for (const row of rows) if (!existingPaths.has(row.path)) del.run(row.id);
+  }
+
+  listMedia(options: { search?: string; kind?: MediaKind; limit?: number; offset?: number; libraryId?: number; folder?: string; sort?: SortKey; liked?: boolean } = {}) {
+    const clauses: string[] = [];
+    const params: SQLInputValue[] = [];
+    const visible = this.visibleIdClause();
+    clauses.push(visible.sql);
+    params.push(...visible.params);
+    if (options.search) {
+      clauses.push('(m.title LIKE ? OR m.filename LIKE ? OR m.series_title LIKE ?)');
+      const q = `%${options.search}%`; params.push(q,q,q);
+    }
+    if (options.kind) { clauses.push('m.kind=?'); params.push(options.kind); }
+    if (options.libraryId) { clauses.push('m.library_id=?'); params.push(options.libraryId); }
+    if (options.folder !== undefined) { clauses.push('m.folder=?'); params.push(options.folder); }
+    if (options.liked) clauses.push('l.media_id IS NOT NULL');
+    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+    const orderBy = SORT_ORDER[options.sort ?? 'title'] ?? SORT_ORDER.title;
+    const requestedLimit = Number.isFinite(options.limit) ? Number(options.limit) : 100;
+    const requestedOffset = Number.isFinite(options.offset) ? Number(options.offset) : 0;
+    const limit = Math.min(Math.max(Math.trunc(requestedLimit), 1), 500);
+    const offset = Math.max(Math.trunc(requestedOffset), 0);
+    return this.db.prepare(`
+      SELECT m.*,p.position AS progress_position,p.duration AS progress_duration,p.completed AS progress_completed,
+        (l.media_id IS NOT NULL) AS liked
+      FROM media m
+      LEFT JOIN progress p ON p.media_id=m.id
+      LEFT JOIN likes l ON l.media_id=m.id ${where}
+      ORDER BY ${orderBy} LIMIT ? OFFSET ?
+    `).all(...params,limit,offset) as unknown as MediaRecord[];
+  }
+
+  getHome() {
+    const visible = this.visibleIdClause();
+    const select = `SELECT m.*,p.position AS progress_position,p.duration AS progress_duration,p.completed AS progress_completed,
+      (l.media_id IS NOT NULL) AS liked
+      FROM media m
+      LEFT JOIN progress p ON p.media_id=m.id
+      LEFT JOIN likes l ON l.media_id=m.id
+      WHERE ${visible.sql}`;
+    const recent = this.db.prepare(`${select} ORDER BY m.added_at DESC LIMIT 24`).all(...visible.params) as unknown as MediaRecord[];
+    const cont = this.db.prepare(`SELECT m.*,p.position AS progress_position,p.duration AS progress_duration,p.completed AS progress_completed,
+      (l.media_id IS NOT NULL) AS liked
+      FROM progress p
+      JOIN media m ON m.id=p.media_id
+      LEFT JOIN likes l ON l.media_id=m.id
+      WHERE ${visible.sql} AND p.position>10 AND p.completed=0 ORDER BY p.updated_at DESC LIMIT 20`).all(...visible.params) as unknown as MediaRecord[];
+    const movies = this.db.prepare(`${select} AND m.kind='movie' ORDER BY m.added_at DESC LIMIT 24`).all(...visible.params) as unknown as MediaRecord[];
+    const series = this.db.prepare(`${select} AND m.kind='series' ORDER BY m.added_at DESC LIMIT 24`).all(...visible.params) as unknown as MediaRecord[];
+    const total = Number((this.db.prepare(`SELECT COUNT(*) c FROM media m WHERE ${visible.sql}`).get(...visible.params) as {c:number}).c);
+    return { recent, continueWatching: cont, movies, series, total };
+  }
+
+
+  listMetadataCandidates(limit = 500): MediaRecord[] {
+    const safeLimit = Math.min(Math.max(limit, 1), 5000);
+    const visible = this.visibleIdClause();
+    return this.db.prepare(`
+      SELECT m.*,p.position AS progress_position,p.duration AS progress_duration,p.completed AS progress_completed,
+        (l.media_id IS NOT NULL) AS liked
+      FROM media m LEFT JOIN progress p ON p.media_id=m.id LEFT JOIN likes l ON l.media_id=m.id
+      WHERE ${visible.sql} AND m.external_id IS NULL
+      ORDER BY m.added_at ASC LIMIT ?
+    `).all(...visible.params, safeLimit) as unknown as MediaRecord[];
+  }
+
+  getShorts(options: { limit?: number; offset?: number; includeLandscapes?: boolean } = {}): ShortsFeed {
+    const requestedLimit = Number.isFinite(options.limit) ? Number(options.limit) : 50;
+    const requestedOffset = Number.isFinite(options.offset) ? Number(options.offset) : 0;
+    const limit = Math.min(Math.max(Math.trunc(requestedLimit), 1), 500);
+    const offset = Math.max(Math.trunc(requestedOffset), 0);
+    const dims = '(m.width IS NOT NULL AND m.height IS NOT NULL AND m.width>0 AND m.height>0)';
+    const cond = options.includeLandscapes ? dims : `${dims} AND m.height>m.width`;
+    const visible = this.visibleIdClause();
+    const items = this.db.prepare(`
+      SELECT m.*,p.position AS progress_position,p.duration AS progress_duration,p.completed AS progress_completed,(l.media_id IS NOT NULL) AS liked
+      FROM media m LEFT JOIN progress p ON p.media_id=m.id LEFT JOIN likes l ON l.media_id=m.id
+      WHERE ${visible.sql} AND ${cond}
+      ORDER BY m.added_at DESC,m.id DESC LIMIT ? OFFSET ?
+    `).all(...visible.params, limit, offset) as unknown as ShortsItem[];
+    const total = Number((this.db.prepare(`SELECT COUNT(*) c FROM media m WHERE ${visible.sql} AND ${cond}`).get(...visible.params) as {c:number}).c);
+    return { items, total };
+  }
+
+  getFolders(): FolderEntry[] {
+    const visible = this.visibleIdClause();
+    return this.db.prepare(`
+      SELECT library_id, folder, COUNT(*) AS count FROM media m
+      WHERE ${visible.sql}
+      GROUP BY library_id, folder ORDER BY folder COLLATE NOCASE
+    `).all(...visible.params) as unknown as FolderEntry[];
+  }
+
+  setLike(mediaId: number, liked: boolean) {
+    if (liked) this.db.prepare('INSERT OR IGNORE INTO likes(media_id,created_at) VALUES(?,?)').run(mediaId, Date.now());
+    else this.db.prepare('DELETE FROM likes WHERE media_id=?').run(mediaId);
+  }
+
+  setProgress(mediaId: number, position: number, duration: number) {
+    const safePosition = Number.isFinite(position) ? Math.max(position, 0) : 0;
+    const safeDuration = Number.isFinite(duration) ? Math.max(duration, 0) : 0;
+    const completed = safeDuration > 0 && safePosition / safeDuration >= 0.92 ? 1 : 0;
+    this.db.prepare(`INSERT INTO progress(media_id,position,duration,completed,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(media_id) DO UPDATE SET position=excluded.position,duration=excluded.duration,completed=excluded.completed,updated_at=excluded.updated_at`)
+      .run(mediaId, safePosition, safeDuration, completed, Date.now());
+  }
+}

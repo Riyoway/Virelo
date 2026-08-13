@@ -1,0 +1,80 @@
+{
+  "name": "virelo",
+  "version": "0.1.0",
+  "description": "Turn any folder into a private, streaming-style video library.",
+  "type": "module",
+  "bin": {
+    "virelo": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "PRIVACY.md",
+    "SECURITY.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "clean": "node scripts/clean.mjs",
+    "build:server": "tsc -p tsconfig.server.json",
+    "build:web": "vite build",
+    "build": "npm run clean && npm run build:server && npm run build:web",
+    "typecheck:web": "tsc -p tsconfig.web.json",
+    "dev:web": "vite --host 127.0.0.1",
+    "dev:server": "npm run build:server && node --watch dist/cli.js --no-open",
+    "prepublishOnly": "npm run check",
+    "pack:check": "npm pack --dry-run",
+    "test": "node --disable-warning=ExperimentalWarning --test tests/*.test.mjs",
+    "check": "npm run build && npm run typecheck:web && npm test && npm run pack:check"
+  },
+  "keywords": [
+    "self-hosted",
+    "media-server",
+    "virelo",
+    "video",
+    "streaming",
+    "media-library",
+    "npx"
+  ],
+  "author": "Riyoway",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Riyoway/virelo.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Riyoway/virelo/issues"
+  },
+  "homepage": "https://github.com/Riyoway/virelo#readme",
+  "engines": {
+    "node": ">=22.16.0"
+  },
+  "dependencies": {
+    "@fastify/static": "^10.1.2",
+    "chokidar": "^5.0.0",
+    "fastify": "^5.10.0",
+    "open": "^11.0.0"
+  },
+  "devDependencies": {
+    "@heroui/react": "^3.2.2",
+    "@heroui/styles": "^3.2.2",
+    "@phosphor-icons/react": "^2.1.10",
+    "@tailwindcss/vite": "^4.3.3",
+    "@tanstack/react-query": "^5.101.4",
+    "@tanstack/react-router": "^1.170.18",
+    "@types/node": "^22.20.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.4",
+    "hls.js": "^1.6.16",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.1.5",
+    "zustand": "^5.0.14"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
