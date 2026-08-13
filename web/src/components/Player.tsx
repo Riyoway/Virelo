@@ -44,8 +44,13 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,autoPlay}:{i
   function scheduleControlsHide(){
     if(controlsTimer.current!==null)window.clearTimeout(controlsTimer.current);
     const video=videoRef.current;
-    if(!usesTouchControls()||!video||video.paused){controlsTimer.current=null;return;}
-    controlsTimer.current=window.setTimeout(()=>{setControlsVisible(false);controlsTimer.current=null;},2400);
+    if(!video||video.paused){controlsTimer.current=null;return;}
+    controlsTimer.current=window.setTimeout(()=>{
+      const keyboardFocus=containerRef.current?.querySelector(':focus-visible');
+      if(keyboardFocus){scheduleControlsHide();return;}
+      setControlsVisible(false);
+      controlsTimer.current=null;
+    },2400);
   }
 
   function toggle(){const v=videoRef.current;if(!v)return;if(v.paused)void v.play();else v.pause();}
@@ -57,7 +62,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,autoPlay}:{i
   async function fullscreen(){const container=containerRef.current;const video=videoRef.current;if(!container||!video)return;await toggleFullscreen(container,video);}
   async function togglePip(){const v=videoRef.current;if(!v||!pipSupported)return;if(document.pictureInPictureElement)await document.exitPictureInPicture();else await v.requestPictureInPicture().catch(()=>{});}
 
-  return <div className={`player${controlsVisible?' controls-visible':''}`} ref={containerRef} onDoubleClick={()=>void fullscreen()} onPointerDown={(event)=>{if(event.pointerType==='touch')revealControls();}} onPointerUp={scheduleControlsHide} onPointerCancel={scheduleControlsHide}>
+  return <div className={`player${controlsVisible?' controls-visible':''}`} ref={containerRef} onDoubleClick={()=>void fullscreen()} onPointerMove={(event)=>{if(event.pointerType==='mouse'){revealControls();scheduleControlsHide();}}} onPointerDown={revealControls} onPointerUp={scheduleControlsHide} onPointerCancel={scheduleControlsHide} onPointerLeave={scheduleControlsHide} onFocusCapture={revealControls} onBlurCapture={scheduleControlsHide} onKeyDown={()=>{revealControls();scheduleControlsHide();}}>
     <video
       ref={videoRef}
       src={`/api/media/${item.id}/stream`}

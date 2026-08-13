@@ -294,9 +294,11 @@ button, a, input { -webkit-tap-highlight-color:transparent; }
 .player { position:relative; width:100%; aspect-ratio:16/9; max-height:calc(100vh - 138px); border-radius:15px; overflow:hidden; background:#000; box-shadow:0 20px 60px rgba(0,0,0,.42); }
 .player:fullscreen,.player:-webkit-full-screen { width:100%; height:100%; max-height:none; aspect-ratio:auto; border-radius:0; }
 .player video { width:100%; height:100%; object-fit:contain; background:#000; cursor:pointer; }
-.player-gradient { position:absolute; pointer-events:none; inset:auto 0 0; height:32%; background:linear-gradient(transparent,rgba(0,0,0,.86)); }
-.player-controls { position:absolute; z-index:8; left:0; right:0; bottom:0; padding:0 18px 15px; opacity:0; transform:translateY(4px); transition:.16s ease; }
-.player:hover .player-controls,.player:focus-within .player-controls,.player.controls-visible .player-controls { opacity:1; transform:none; }
+.player-gradient { position:absolute; pointer-events:none; inset:auto 0 0; height:32%; background:linear-gradient(transparent,rgba(0,0,0,.86)); transition:opacity .16s ease; }
+.player-controls { position:absolute; z-index:8; left:0; right:0; bottom:0; padding:0 18px 15px; opacity:0; transform:translateY(4px); pointer-events:none; transition:opacity .16s ease,transform .16s ease; }
+.player.controls-visible .player-controls { opacity:1; transform:none; pointer-events:auto; }
+.player:not(.controls-visible) .player-gradient { opacity:0; }
+.player:not(.controls-visible) video { cursor:none; }
 .player-seek { width:100%; height:18px; accent-color:var(--color-brand); cursor:pointer; }
 .player-toolbar { display:flex; align-items:center; gap:12px; min-width:0; }
 .player-toolbar button { width:38px; height:38px; display:grid; place-items:center; border:0; background:transparent; color:#fff; cursor:pointer; border-radius:50%; }
@@ -506,8 +508,7 @@ button, a, input { -webkit-tap-highlight-color:transparent; }
 }
 
 @media (pointer:coarse) {
-  .player:not(.controls-visible) .player-controls { opacity:0; transform:translateY(8px); pointer-events:none; }
-  .player:not(.controls-visible) .player-gradient { opacity:0; }
+  .player:not(.controls-visible) .player-controls { transform:translateY(8px); }
   .media-card-art { transition:none; }
 }
 
