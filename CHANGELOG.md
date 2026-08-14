@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.1.1 — 2026-08-14
+
+- Improved responsive headers, typography, settings controls and mobile playback navigation.
+- Fixed player controls auto-hiding on desktop, phones and tablets.
+- Fixed fullscreen playback on iPad.
+- Added a dedicated not-found page and normalized dark-theme control states.
+- Removed the in-app PWA install prompt.
 - Use fixed port `41777` by default for a stable PWA origin, with `--port 0` and `--random-port` available when a conflict occurs.
 
 ## 0.1.0 — 2026-08-08

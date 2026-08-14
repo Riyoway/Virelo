@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createVireloServer, startServer } from '../dist/server.js';
+
+const packageMetadata = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 
 test('health remains available when FFmpeg tools cannot be started', async () => {
   const root = await mkdtemp(join(tmpdir(), 'virelo-server-test-'));
@@ -33,7 +35,7 @@ test('health remains available when FFmpeg tools cannot be started', async () =>
     assert.equal(response.statusCode, 200);
     assert.deepEqual(response.json(), {
       ok: true,
-      version: '0.1.0',
+      version: packageMetadata.version,
       ffmpeg: false,
       ffprobe: false,
       scan: {
