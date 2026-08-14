@@ -287,10 +287,11 @@ button, a, input { -webkit-tap-highlight-color:transparent; }
 .detail-wrap>.media-section .section-heading,.detail-wrap>.media-section .media-row { padding-right:0; }
 
 .watch-view { width:min(1500px,100%); margin:0 auto; padding:28px clamp(12px,3vw,42px) 90px; position:relative; }
-.watch-back { position:relative; z-index:20; left:auto; top:auto; width:46px; height:46px; margin:0 0 14px; border:1px solid rgba(255,255,255,.18); border-radius:50%; background:#171717; color:#fff; display:grid; place-items:center; cursor:pointer; }
-.watch-back:hover { background:#252525; border-color:rgba(255,255,255,.32); }
-.watch-back:focus-visible { outline:2px solid #fff; outline-offset:3px; }
-.watch-back svg { width:22px; height:22px; }
+.watch-back { position:relative; z-index:20; left:auto; top:auto; width:44px; height:44px; margin:0 0 14px; border:1px solid rgba(255,255,255,.1); border-radius:13px; background:rgba(24,24,26,.72); color:var(--text); display:grid; place-items:center; box-shadow:inset 0 1px rgba(255,255,255,.055),0 8px 24px rgba(0,0,0,.22); backdrop-filter:blur(18px) saturate(110%); cursor:pointer; touch-action:manipulation; transition:background-color var(--dur-short) var(--ease-out),border-color var(--dur-short) var(--ease-out),box-shadow var(--dur-short) var(--ease-out),transform var(--dur-micro) var(--ease-out); }
+.watch-back:hover { border-color:rgba(255,255,255,.16); background:rgba(40,40,42,.82); box-shadow:inset 0 1px rgba(255,255,255,.075),0 10px 28px rgba(0,0,0,.28); }
+.watch-back:active { background:rgba(48,48,50,.88); transform:scale(.96); }
+.watch-back:focus-visible { outline:2px solid var(--color-focus); outline-offset:3px; }
+.watch-back svg { width:20px; height:20px; }
 .player { position:relative; width:100%; aspect-ratio:16/9; max-height:calc(100vh - 138px); border-radius:15px; overflow:hidden; background:#000; box-shadow:0 20px 60px rgba(0,0,0,.42); }
 .player:fullscreen,.player:-webkit-full-screen { width:100%; height:100%; max-height:none; aspect-ratio:auto; border-radius:0; }
 .player video { width:100%; height:100%; object-fit:contain; background:#000; cursor:pointer; }
@@ -484,6 +485,10 @@ button, a, input { -webkit-tap-highlight-color:transparent; }
   .settings-actions .button { width:100%; }
   .skeleton-row { grid-template-columns:repeat(2,1fr); }
   .skeleton-row>*:nth-child(n+3) { display:none; }
+}
+
+@media (min-width: 901px) {
+  .watch-back { display:none; }
 }
 
 @media (max-width: 1024px) and (min-width: 901px) {
