@@ -29,15 +29,13 @@ export function SettingsView(){
   const health=useQuery({queryKey:['health'],queryFn:async()=>{const r=await fetch('/api/health');return r.json() as Promise<{ffmpeg:boolean;ffprobe:boolean}>;}});
   const [form,setForm]=useState<Settings|null>(null);
   const [path,setPath]=useState('');
-  const [apiKey,setApiKey]=useState('');
   const [activeSection,setActiveSection]=useState<SettingsSectionId>('libraries');
   useEffect(()=>{if(settingsQuery.data&&!form)setForm(settingsQuery.data);},[settingsQuery.data,form]);
-  const save=useMutation({mutationFn:()=>api.saveSettings({...form!,tmdbApiKey:apiKey||undefined}),onSuccess:(data)=>{setForm(data);setApiKey('');client.setQueryData(['settings'],data);}});
-  const clearKey=useMutation({mutationFn:()=>api.saveSettings({clearTmdbApiKey:true}),onSuccess:(data)=>{setForm(data);setApiKey('');client.setQueryData(['settings'],data);}});
+  const save=useMutation({mutationFn:()=>api.saveSettings(form!),onSuccess:(data)=>{setForm(data);client.setQueryData(['settings'],data);}});
   const add=useMutation({mutationFn:()=>api.addLibrary(path),onSuccess:()=>{setPath('');void client.invalidateQueries({queryKey:['libraries']});void client.invalidateQueries({queryKey:['scan']});}});
   const remove=useMutation({mutationFn:(id:number)=>api.removeLibrary(id),onSuccess:()=>{void client.invalidateQueries({queryKey:['libraries']});void client.invalidateQueries({queryKey:['home']});}});
   if(!form)return <div className="settings-loading skeleton"/>;
-  const hasChanges=JSON.stringify(form)!==JSON.stringify(settingsQuery.data)||apiKey.length>0;
+  const hasChanges=JSON.stringify(form)!==JSON.stringify(settingsQuery.data);
   return <div className="content-view settings-view">
     <header className="settings-heading"><h1>Settings</h1><div className="settings-heading-actions"><span aria-live="polite">{save.isSuccess&&!hasChanges&&<span className="settings-saved"><CheckCircle/> Saved</span>}</span><Button isPending={save.isPending} isDisabled={!hasChanges} onPress={()=>save.mutate()}>Save settings</Button></div></header>
     {save.error&&<p className="error-copy settings-save-error">{save.error.message}</p>}
@@ -56,17 +54,16 @@ export function SettingsView(){
           <div className="add-library"><Input aria-label="Media folder path" placeholder={navigator.userAgent.includes('Windows')?'D:\\Videos':'/home/user/Videos'} value={path} onChange={(e)=>setPath(e.target.value)}/><Button isPending={add.isPending} onPress={()=>add.mutate()} isDisabled={!path.trim()}><FolderPlus/> Add folder</Button></div>
           {add.error&&<p className="error-copy">{add.error.message}</p>}
           <div className="library-list">{libraries.data?.map(lib=><div key={lib.id}><div><strong>{lib.label}</strong><span>{lib.path}</span></div><Button isIconOnly variant="ghost" aria-label={`Remove ${lib.label}`} onPress={()=>remove.mutate(lib.id)}><Trash/></Button></div>)}</div>
-          <div className="scan-strip"><div>{scan.data?.running?<ArrowsClockwise className="spin"/>:<CheckCircle/>}<span><strong>{scan.data?.message||'Idle'}</strong>{scan.data?.running&&` · ${scan.data.scanned} scanned`}</span></div><Button variant="secondary" isPending={scan.data?.running} onPress={()=>api.startScan().then(()=>client.invalidateQueries({queryKey:['scan']}))}><ArrowsClockwise/> Scan now</Button></div>
+          <div className="scan-strip"><div>{scan.data?.running?<ArrowsClockwise className="spin"/>:<CheckCircle/>}<span><strong>{scan.data?.message||'Idle'}</strong>{scan.data?.running&&` · ${scan.data.scanned} scanned`}</span></div><Button variant="secondary" isPending={scan.data?.running} onPress={()=>api.startScan().then(()=>client.invalidateQueries({queryKey:['scan']}))}>Scan</Button></div>
           <ScanProgress status={scan.data} compact/>
           <SettingSwitch checked={form.showAllLibraries} onChange={(v)=>setForm({...form,showAllLibraries:v})} title="Show libraries from other folders" description="Include folders added outside the folder where Virelo was started."/>
         </section>}
 
         {activeSection==='network'&&<section id="settings-panel-network" className="settings-card settings-section" aria-labelledby="settings-title-network">
-          <div className="settings-card-head"><div><h2 id="settings-title-network">Network & metadata</h2><p>Choose which online services Virelo can use for metadata and artwork.</p></div></div>
-          <SettingSwitch checked={form.externalMetadataEnabled} onChange={(v)=>setForm({...form,externalMetadataEnabled:v})} title="External metadata" description="Allow TMDB requests for titles, summaries, years and genres."/>
-          <SettingSwitch checked={form.externalImagesEnabled} onChange={(v)=>setForm({...form,externalImagesEnabled:v})} title="External artwork" description="Allow poster and backdrop downloads after metadata is enabled."/>
+          <div className="settings-card-head"><div><h2 id="settings-title-network">Network & metadata</h2><p>Control automatic library matching and folder monitoring.</p></div></div>
+          <SettingSwitch checked={form.externalMetadataEnabled} onChange={(v)=>setForm({...form,externalMetadataEnabled:v})} title="Online metadata" description="Match titles, summaries, genres and release years during scans. No account or API key required."/>
+          <SettingSwitch checked={form.externalImagesEnabled} disabled={!form.externalMetadataEnabled} onChange={(v)=>setForm({...form,externalImagesEnabled:v})} title="Posters and artwork" description="Replace generated thumbnails with posters, backdrops and episode images."/>
           <SettingSwitch checked={form.libraryWatchEnabled} onChange={(v)=>setForm({...form,libraryWatchEnabled:v})} title="Watch local folders" description="Monitor configured folders and scan when files change."/>
-          <div className="settings-grid"><label><span>Metadata language</span><Input value={form.metadataLanguage} onChange={(e)=>setForm({...form,metadataLanguage:e.target.value})} placeholder="ja-JP"/></label><label><span>TMDB API key {form.tmdbApiKeyConfigured&&<em>configured</em>}</span><Input type="password" value={apiKey} onChange={(e)=>setApiKey(e.target.value)} placeholder={form.tmdbApiKeyConfigured?'Leave blank to keep current key':'Only used if metadata is enabled'}/>{form.tmdbApiKeyConfigured&&<Button className="clear-key" size="sm" variant="ghost" isPending={clearKey.isPending} onPress={()=>clearKey.mutate()}>Clear saved key</Button>}</label></div>
         </section>}
 
         {activeSection==='playback'&&<section id="settings-panel-playback" className="settings-card settings-section" aria-labelledby="settings-title-playback">
@@ -89,6 +86,6 @@ export function SettingsView(){
   </div>;
 }
 
-function SettingSwitch({checked,onChange,title,description}:{checked:boolean;onChange:(value:boolean)=>void;title:string;description:string}){
-  return <div className="setting-row"><div className="setting-copy"><div><strong>{title}</strong><p>{description}</p></div></div><Switch isSelected={checked} onChange={onChange} aria-label={title}><Switch.Content><Switch.Control><Switch.Thumb/></Switch.Control></Switch.Content></Switch></div>;
+function SettingSwitch({checked,onChange,title,description,disabled=false}:{checked:boolean;onChange:(value:boolean)=>void;title:string;description:string;disabled?:boolean}){
+  return <div className="setting-row"><div className="setting-copy"><div><strong>{title}</strong><p>{description}</p></div></div><Switch isSelected={checked} isDisabled={disabled} onChange={onChange} aria-label={title}><Switch.Content><Switch.Control><Switch.Thumb/></Switch.Control></Switch.Content></Switch></div>;
 }

@@ -22,6 +22,15 @@ export function useHlsFallback(item: MediaItem, videoRef: RefObject<HTMLVideoEle
     if (fallbackTimer.current !== null) window.clearInterval(fallbackTimer.current);
   }, []);
 
+  useEffect(() => {
+    hlsRef.current?.destroy();
+    hlsRef.current = null;
+    if (fallbackTimer.current !== null) window.clearInterval(fallbackTimer.current);
+    fallbackTimer.current = null;
+    setState('idle');
+    setError('');
+  }, [item.id]);
+
   async function attachHls(url: string) {
     const video = videoRef.current;
     if (!video) return;

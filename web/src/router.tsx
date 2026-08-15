@@ -22,7 +22,7 @@ export interface WatchRouteSearch {
 
 function validateWatchSearch(input: Record<string, unknown>): WatchRouteSearch {
   return {
-    queue: input.queue === '1' || input.queue === 'true',
+    queue: input.queue === true || input.queue === '1' || input.queue === 'true',
     folder: typeof input.folder === 'string' && input.folder !== '' ? input.folder.slice(0, 500) : undefined,
     libraryId: typeof input.libraryId === 'string' && /^\d+$/.test(input.libraryId) ? Number(input.libraryId) : undefined,
     sort: (['title', 'newest', 'oldest', 'year', 'duration', 'random'] as string[]).includes(String(input.sort ?? '')) ? input.sort as SortKey : undefined,

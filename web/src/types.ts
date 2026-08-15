@@ -66,7 +66,7 @@ export interface Library { id:number; path:string; label:string; created_at:numb
 export interface Settings {
   externalMetadataEnabled: boolean;
   externalImagesEnabled: boolean;
-  metadataProvider: 'tmdb';
+  metadataProvider: 'cinemeta' | 'tmdb';
   metadataLanguage: string;
   tmdbApiKey: string;
   tmdbApiKeyConfigured: boolean;

@@ -75,7 +75,7 @@ export function MediaCard({item, compact=false, short=false, playDirect=false, p
       onPointerCancel={clearLongPress}
       onClick={handleClick}>
       <div className="media-card-art">
-        <img src={artwork(item, item.external_id ? 'backdrop' : 'thumbnail')} alt="" loading="lazy" decoding="async" onError={(e)=>{const image=e.currentTarget;if(item.external_id && !image.dataset.fallback){image.dataset.fallback='1';image.src=artwork(item,'poster');return;}if(image.dataset.fallback==='1'){image.dataset.fallback='2';image.src=artwork(item,'thumbnail');return;}image.style.display='none';}}/>
+        <img src={artwork(item, item.backdrop_path ? 'backdrop' : item.poster_path ? 'poster' : 'thumbnail')} alt="" loading="lazy" decoding="async" onError={(e)=>{const image=e.currentTarget;if(item.poster_path&&!image.dataset.fallback){image.dataset.fallback='1';image.src=artwork(item,'poster');return;}if(image.dataset.fallback==='1'){image.dataset.fallback='2';image.src=artwork(item,'thumbnail');return;}image.style.display='none';}}/>
         <div className="media-card-fallback"><Play weight="fill"/></div>
         <div className="media-card-play"><span><Play weight="fill"/></span></div>
         {preview && <PreviewPlayer item={item} start={previewStart} />}

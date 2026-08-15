@@ -38,6 +38,19 @@ To serve another folder without changing directories:
 npx virelo --media ~/Videos
 ```
 
+### Termux
+
+On Android, install a current Termux release from [F-Droid](https://f-droid.org/packages/com.termux/) or [Termux GitHub releases](https://github.com/termux/termux-app/releases), then run:
+
+```bash
+pkg update && pkg upgrade
+pkg install nodejs ffmpeg
+termux-setup-storage
+npx virelo --media "$HOME/storage/shared/Movies" --no-open
+```
+
+Open `http://127.0.0.1:41777` in your browser. Pass `--media` explicitly instead of starting Virelo from your Termux home directory so package caches and other personal files are not treated as a media library.
+
 If port `41777` is already in use, let the operating system choose an available one:
 
 ```bash
@@ -61,7 +74,7 @@ npx virelo --media "C:\Users\You\Videos" --random-port
 | ▶️ | **Playback** | Range streaming, seeking, watch progress, and queue controls. |
 | 📱 | **Shorts** | A vertical feed for portrait videos with swipe-friendly controls. |
 | 💜 | **Favorites** | Save videos for quick access from the library. |
-| 🖼️ | **Artwork** | Optional thumbnails, metadata, and artwork with FFmpeg and TMDB. |
+| 🖼️ | **Artwork** | Automatic movie and series metadata, posters, backdrops, and episode images. |
 | 🌐 | **Responsive UI** | Works on desktop, tablet, and mobile screens. |
 | 📦 | **PWA** | Install Virelo as an app when supported by your browser. |
 | 🔒 | **Private by default** | Localhost binding, no accounts, no telemetry, and no advertising. |
@@ -127,7 +140,7 @@ Virelo works without FFmpeg for formats supported by the browser. Installing `ff
 - codec detection
 - HLS fallback for formats browsers cannot play directly
 
-TMDB integration is also optional. Configure it from **Settings → Network** when you want external metadata or artwork. Source video files are never sent to TMDB.
+Virelo can automatically match filenames to movie and series metadata, then cache posters, backdrops, and episode artwork locally. Configure this from **Settings → Network**. Source video files are never sent to the metadata provider.
 
 ## 💾 Data
 
@@ -201,7 +214,7 @@ Issues and pull requests are welcome. If you find a bug, include your operating 
 
 ## 🔒 Privacy
 
-Virelo has no telemetry, analytics, advertising, account registration, or automatic update checks. External metadata and artwork requests remain disabled until configured in Settings.
+Virelo has no telemetry, analytics, advertising, account registration, or automatic update checks. Metadata matching sends parsed filenames and media identifiers only; video files remain on your device. Online metadata and artwork can be disabled in Settings.
 
 See [PRIVACY.md](PRIVACY.md) for details.
 

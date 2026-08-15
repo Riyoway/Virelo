@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { VireloDB } from './db.js';
 import { ensureDataDirs, type RuntimeConfig } from './config.js';
 import { scanAll } from './scanner.js';
-import { refreshMissingTmdbMetadata, refreshTmdbMetadata } from './metadata.js';
+import { refreshMetadata, refreshMissingMetadata } from './metadata.js';
 import { hasFfmpeg, hasFfprobe } from './ffmpeg.js';
 import { startHlsTranscode, transcodeStatus, stopAllTranscodes } from './transcode.js';
 import type { AppSettings, MediaKind, ScanStatus, SortKey } from './types.js';
@@ -53,6 +53,14 @@ function isPrivateHost(host: string, configHost: string) {
   if (cgnat && Number(cgnat[1]) >= 64 && Number(cgnat[1]) <= 127) return true;
   if (/^(fc|fd|fe[89ab])/i.test(normalized)) return true;
   return false;
+}
+
+function isTermuxRuntime() {
+  return Boolean(process.env.TERMUX_VERSION || process.env.PREFIX?.includes('/com.termux/'));
+}
+
+function isHiddenPath(path: string) {
+  return path.split(/[\\/]/).some((segment) => segment.startsWith('.') && segment !== '.' && segment !== '..');
 }
 
 export async function createVireloServer(config: RuntimeConfig) {
@@ -109,10 +117,10 @@ export async function createVireloServer(config: RuntimeConfig) {
       try {
         await scanAll(db, config.dataDir, scanStatus);
         const settings = db.getSettings();
-        if (settings.externalMetadataEnabled && settings.tmdbApiKey) {
-          scanStatus.message = 'Fetching permitted metadata';
-          const result = await refreshMissingTmdbMetadata(db, config.dataDir, (done, total) => {
-            scanStatus.message = `Fetching permitted metadata · ${done}/${total}`;
+        if (settings.externalMetadataEnabled) {
+          scanStatus.message = 'Matching metadata';
+          const result = await refreshMissingMetadata(db, config.dataDir, (done, total) => {
+            scanStatus.message = `Matching metadata · ${done}/${total}`;
           });
           scanStatus.message = result.attempted ? `Scan complete · ${result.updated} metadata matches` : 'Scan complete';
         } else {
@@ -135,12 +143,25 @@ export async function createVireloServer(config: RuntimeConfig) {
     if (!db.getSettings().libraryWatchEnabled) return;
     const paths = db.visibleLibraries().map((l) => l.path).filter((p) => existsSync(p));
     if (!paths.length) return;
-    watcher = chokidar.watch(paths, { ignoreInitial: true, awaitWriteFinish: { stabilityThreshold: 1200, pollInterval: 200 } });
+    watcher = chokidar.watch(paths, {
+      ignoreInitial: true,
+      ignored: isHiddenPath,
+      usePolling: isTermuxRuntime(),
+      awaitWriteFinish: { stabilityThreshold: 1200, pollInterval: 200 }
+    });
     const schedule = () => {
       if (watchDebounce) clearTimeout(watchDebounce);
       watchDebounce = setTimeout(() => { void runScan(); }, 1400);
     };
-    watcher.on('add', schedule).on('change', schedule).on('unlink', schedule).on('addDir', schedule).on('unlinkDir', schedule);
+    watcher
+      .on('add', schedule)
+      .on('change', schedule)
+      .on('unlink', schedule)
+      .on('addDir', schedule)
+      .on('unlinkDir', schedule)
+      .on('error', (error) => {
+        app.log.warn({ err: error }, 'Library watcher stopped; use Scan now to refresh manually');
+      });
   }
 
   app.get('/api/health', async () => ({ ok: true, version: VIRELO_VERSION, ffmpeg: await hasFfmpeg(), ffprobe: await hasFfprobe(), scan: scanStatus }));
@@ -156,7 +177,7 @@ export async function createVireloServer(config: RuntimeConfig) {
     db.updateSettings(patch);
     await refreshWatcher();
     const updatedSettings = db.getSettings();
-    if (updatedSettings.externalMetadataEnabled && updatedSettings.tmdbApiKey) void runScan();
+    if (updatedSettings.externalMetadataEnabled) void runScan();
     return publicSettings(updatedSettings);
   });
 
@@ -236,7 +257,7 @@ export async function createVireloServer(config: RuntimeConfig) {
   });
 
   app.post<{ Params: { id: string } }>('/api/media/:id/metadata/refresh', async (request, reply) => {
-    try { return await refreshTmdbMetadata(db, config.dataDir, Number(request.params.id)); }
+    try { return await refreshMetadata(db, config.dataDir, Number(request.params.id)); }
     catch (error) { return reply.code(400).send({ error: error instanceof Error ? error.message : 'Metadata refresh failed' }); }
   });
 

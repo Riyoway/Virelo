@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added setup-free movie and series metadata matching with automatic poster, backdrop, and episode artwork downloads.
+- Kept user-provided TMDB keys as an optional compatibility path for localized metadata.
+
 ## 0.1.1 — 2026-08-14
 
 - Improved responsive headers, typography, settings controls and mobile playback navigation.

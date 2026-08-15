@@ -1,14 +1,27 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowsOut, FastForward, Pause, PictureInPicture, Play, Rewind, SkipBack, SkipForward, SpeakerHigh, SpeakerSlash, SpinnerGap } from '@phosphor-icons/react';
+import { ArrowsOut, FastForward, Pause, PictureInPicture, Play, RepeatOnce, Rewind, SkipBack, SkipForward, SpeakerHigh, SpeakerSlash, SpinnerGap } from '@phosphor-icons/react';
 import { api } from '../api';
 import { useHlsFallback } from '../hooks/useHlsFallback';
 import { toggleFullscreen } from '../utils/fullscreen';
 import type { MediaItem } from '../types';
 
-export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,autoPlay}:{item:MediaItem;queue?:MediaItem[];queueIndex?:number;onEnded?:()=>void;onNext?:()=>void;onPrev?:()=>void;autoPlay?:boolean}) {
+interface PlayerProps {
+  item: MediaItem;
+  queue?: MediaItem[];
+  queueIndex?: number;
+  onEnded?: () => void;
+  onNext?: () => void;
+  onPrev?: () => void;
+  canGoNext?: boolean;
+  canGoPrev?: boolean;
+  autoPlay?: boolean;
+}
+
+export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=true,canGoPrev=true,autoPlay}:PlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const lastProgress = useRef(0);
+  const playbackItemId = useRef(item.id);
   const controlsTimer = useRef<number | null>(null);
   const { fallback, error, startFallback } = useHlsFallback(item, videoRef);
   const [playing,setPlaying] = useState(false);
@@ -18,7 +31,15 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,autoPlay}:{i
   const [muted,setMuted] = useState(false);
   const [pip,setPip] = useState(false);
   const [pipSupported,setPipSupported] = useState(false);
+  const [looping,setLooping] = useState(false);
   const [controlsVisible,setControlsVisible] = useState(true);
+
+  useEffect(()=>{
+    lastProgress.current=0;
+    setPlaying(false);
+    setCurrent(0);
+    setDuration(item.duration||0);
+  },[item.id,item.duration]);
 
   useEffect(()=>{
     const video=videoRef.current;
@@ -62,26 +83,28 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,autoPlay}:{i
   async function fullscreen(){const container=containerRef.current;const video=videoRef.current;if(!container||!video)return;await toggleFullscreen(container,video);}
   async function togglePip(){const v=videoRef.current;if(!v||!pipSupported)return;if(document.pictureInPictureElement)await document.exitPictureInPicture();else await v.requestPictureInPicture().catch(()=>{});}
 
-  return <div className={`player${controlsVisible?' controls-visible':''}`} ref={containerRef} onDoubleClick={()=>void fullscreen()} onPointerMove={(event)=>{if(event.pointerType==='mouse'){revealControls();scheduleControlsHide();}}} onPointerDown={revealControls} onPointerUp={scheduleControlsHide} onPointerCancel={scheduleControlsHide} onPointerLeave={scheduleControlsHide} onFocusCapture={revealControls} onBlurCapture={scheduleControlsHide} onKeyDown={()=>{revealControls();scheduleControlsHide();}}>
+  return <div className={`player${queue?.length?' has-queue':''}${controlsVisible?' controls-visible':''}`} ref={containerRef} onDoubleClick={()=>void fullscreen()} onPointerMove={(event)=>{if(event.pointerType==='mouse'){revealControls();scheduleControlsHide();}}} onPointerDown={revealControls} onPointerUp={scheduleControlsHide} onPointerCancel={scheduleControlsHide} onPointerLeave={scheduleControlsHide} onFocusCapture={revealControls} onBlurCapture={scheduleControlsHide} onKeyDown={()=>{revealControls();scheduleControlsHide();}}>
     <video
       ref={videoRef}
       src={`/api/media/${item.id}/stream`}
       playsInline
+      loop={looping}
       preload={autoPlay?'auto':'metadata'}
       autoPlay={autoPlay}
       onClick={handleVideoClick}
       onPlay={()=>{setPlaying(true);revealControls();scheduleControlsHide();}}
-      onPause={(e)=>{setPlaying(false);revealControls();const v=e.currentTarget;void api.progress(item.id,v.currentTime,v.duration||duration);}}
+      onPause={(e)=>{setPlaying(false);revealControls();const v=e.currentTarget;void api.progress(playbackItemId.current,v.currentTime,v.duration||duration);}}
       onLoadedMetadata={(e)=>{
-        const v=e.currentTarget;setDuration(v.duration||item.duration||0);
+        const v=e.currentTarget;playbackItemId.current=item.id;setDuration(v.duration||item.duration||0);
         const resume=item.progress_position||0;
         if(resume>5 && (!v.duration || resume < v.duration*.92)) v.currentTime=resume;
       }}
+      onCanPlay={(e)=>{if(autoPlay&&e.currentTarget.paused)void e.currentTarget.play().catch(()=>{});}}
       onTimeUpdate={(e)=>{
         const v=e.currentTarget;setCurrent(v.currentTime);
-        if(Math.abs(v.currentTime-lastProgress.current)>5){lastProgress.current=v.currentTime;void api.progress(item.id,v.currentTime,v.duration||duration);}
+        if(Math.abs(v.currentTime-lastProgress.current)>5){lastProgress.current=v.currentTime;void api.progress(playbackItemId.current,v.currentTime,v.duration||duration);}
       }}
-      onEnded={(e)=>{void api.progress(item.id,e.currentTarget.duration,e.currentTarget.duration);onEnded?.();}}
+      onEnded={(e)=>{void api.progress(playbackItemId.current,e.currentTarget.duration,e.currentTarget.duration);onEnded?.();}}
       onError={()=>{if(fallback==='idle')void startFallback();}}
     />
     {fallback==='starting' && <div className="player-status"><SpinnerGap className="spin"/><strong>Preparing video…</strong><span>This may take a moment.</span></div>}
@@ -90,11 +113,12 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,autoPlay}:{i
     <div className="player-controls">
       <input className="player-seek" aria-label="Seek" type="range" min="0" max={Math.max(duration,1)} step="0.1" value={Math.min(current,Math.max(duration,1))} onChange={(e)=>seek(Number(e.target.value))}/>
       <div className="player-toolbar">
-        {onPrev && <button onClick={onPrev} aria-label="Previous"><SkipBack weight="fill"/></button>}
+        {onPrev && <button onClick={onPrev} aria-label="Previous video" disabled={!canGoPrev}><SkipBack weight="fill"/></button>}
         <button className="skip-button" onClick={()=>seekBy(-10)} aria-label="Rewind 10 seconds"><Rewind weight="bold"/></button>
         <button onClick={toggle} aria-label={playing?'Pause':'Play'}>{playing?<Pause weight="fill"/>:<Play weight="fill"/>}</button>
         <button className="skip-button" onClick={()=>seekBy(10)} aria-label="Fast-forward 10 seconds"><FastForward weight="bold"/></button>
-        {onNext && <button onClick={onNext} aria-label="Next"><SkipForward weight="fill"/></button>}
+        {onNext && <button onClick={onNext} aria-label="Next video" disabled={!canGoNext}><SkipForward weight="fill"/></button>}
+        <button className={looping?'active':''} onClick={()=>setLooping((value)=>!value)} aria-label={looping?'Turn off loop':'Loop current video'} aria-pressed={looping}><RepeatOnce weight={looping?'fill':'regular'}/></button>
         <button onClick={toggleMute} aria-label={muted?'Unmute':'Mute'}>{muted?<SpeakerSlash weight="fill"/>:<SpeakerHigh weight="fill"/>}</button>
         <input className="volume-slider" aria-label="Volume" type="range" min="0" max="1" step="0.05" value={muted?0:volume} onChange={(e)=>setVol(Number(e.target.value))}/>
         <span className="player-time">{time(current)} / {time(duration)}</span>

@@ -55,7 +55,7 @@ export interface FolderEntry {
 export interface AppSettings {
   externalMetadataEnabled: boolean;
   externalImagesEnabled: boolean;
-  metadataProvider: 'tmdb';
+  metadataProvider: 'cinemeta' | 'tmdb';
   metadataLanguage: string;
   tmdbApiKey: string;
   libraryWatchEnabled: boolean;

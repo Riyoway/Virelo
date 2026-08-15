@@ -3,9 +3,9 @@ import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import type { AppSettings, FolderEntry, Library, MediaRecord, MediaKind, ShortsFeed, ShortsItem, SortKey } from './types.js';
 
 const DEFAULT_SETTINGS: AppSettings = {
-  externalMetadataEnabled: false,
-  externalImagesEnabled: false,
-  metadataProvider: 'tmdb',
+  externalMetadataEnabled: true,
+  externalImagesEnabled: true,
+  metadataProvider: 'cinemeta',
   metadataLanguage: 'ja-JP',
   tmdbApiKey: '',
   libraryWatchEnabled: true,
@@ -290,16 +290,16 @@ export class VireloDB {
   }
 
 
-  listMetadataCandidates(limit = 500): MediaRecord[] {
+  listMetadataCandidates(limit = 500, includeMissingArtwork = false): MediaRecord[] {
     const safeLimit = Math.min(Math.max(limit, 1), 5000);
     const visible = this.visibleIdClause();
     return this.db.prepare(`
       SELECT m.*,p.position AS progress_position,p.duration AS progress_duration,p.completed AS progress_completed,
         (l.media_id IS NOT NULL) AS liked
       FROM media m LEFT JOIN progress p ON p.media_id=m.id LEFT JOIN likes l ON l.media_id=m.id
-      WHERE ${visible.sql} AND m.external_id IS NULL
+      WHERE ${visible.sql} AND (m.external_id IS NULL OR (?=1 AND (m.poster_path IS NULL OR m.backdrop_path IS NULL)))
       ORDER BY m.added_at ASC LIMIT ?
-    `).all(...visible.params, safeLimit) as unknown as MediaRecord[];
+    `).all(...visible.params, includeMissingArtwork ? 1 : 0, safeLimit) as unknown as MediaRecord[];
   }
 
   getShorts(options: { limit?: number; offset?: number; includeLandscapes?: boolean } = {}): ShortsFeed {
