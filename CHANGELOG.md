@@ -2,8 +2,13 @@
 
 ## Unreleased
 
+## 0.1.2 — 2026-08-15
+
 - Added setup-free movie and series metadata matching with automatic poster, backdrop, and episode artwork downloads.
 - Kept user-provided TMDB keys as an optional compatibility path for localized metadata.
+- Added a visible Play All queue with previous, next, automatic advance, and folder-loop behavior.
+- Added a current-video loop control and made normal playback start automatically.
+- Improved Termux folder watching by ignoring hidden directories and using polling where required.
 
 ## 0.1.1 — 2026-08-14
 
