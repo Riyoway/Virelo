@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { Button } from '@heroui/react';
@@ -83,27 +83,48 @@ export function LibraryView() {
     </header>
 
     {libraries.length > 1 && <nav className="folder-nav" aria-label="Library selection">
-      <div className="folder-row">
+      <FolderRow>
         <button className={`folder-chip ${libraryId===null ? 'active' : ''}`} onClick={()=>{setLibraryId(null);setFolder(null);}}>All libraries</button>
         {libraries.map((l:Library)=><button key={l.id} className={`folder-chip ${libraryId===l.id ? 'active' : ''}`} onClick={()=>{setLibraryId(l.id);setFolder(null);}}>{l.label}</button>)}
-      </div>
+      </FolderRow>
     </nav>}
 
     <nav className="folder-nav" aria-label="Folder navigation">
-      <div className="folder-row crumbs">
+      <FolderRow className="crumbs">
         <button className={`folder-chip crumb ${folder===null ? 'active' : ''}`} onClick={()=>jumpTo(0)}>All folders</button>
         {segments.map((segment,i)=><button key={i} className={`folder-chip crumb ${i===segments.length-1 ? 'active' : ''}`} onClick={()=>jumpTo(i+1)}>{segment}</button>)}
         {folder==='' && <span className="folder-chip crumb active">Root</span>}
-      </div>
-      {childFolders.length > 0 && <div className="folder-row">
+      </FolderRow>
+      {childFolders.length > 0 && <FolderRow>
         {childFolders.map((child)=><button key={child.name} className="folder-chip" onClick={()=>openChild(child.name)}><FolderSimple/> {child.name} <em>{child.count}</em></button>)}
-      </div>}
-      {rootCount > 0 && folder === null && <div className="folder-row">
+      </FolderRow>}
+      {rootCount > 0 && folder === null && <FolderRow>
         <button className="folder-chip" onClick={()=>setFolder('')}><FolderSimple/> Root <em>{rootCount}</em></button>
-      </div>}
+      </FolderRow>}
     </nav>
 
     {mediaQ.isLoading ? <div className="media-grid">{Array.from({length:12},(_,i)=><div className="skeleton grid-skeleton" key={i}/>)}</div> :
       media.length ? <div className="media-grid">{media.map(item=><MediaCard key={item.id} item={item}/>)}</div> : <div className="search-empty"><MagnifyingGlass/><h2>No matches</h2><p>Try another title, folder or file name.</p></div>}
   </div>;
+}
+
+function FolderRow({children,className=''}:{children:ReactNode;className?:string}){
+  const ref=useRef<HTMLDivElement>(null);
+  useEffect(()=>{
+    const row=ref.current;
+    if(!row)return;
+    const handleWheel=(event:WheelEvent)=>{
+      if(Math.abs(event.deltaY)<=Math.abs(event.deltaX)||row.scrollWidth<=row.clientWidth)return;
+      const scale=event.deltaMode===WheelEvent.DOM_DELTA_LINE?16:event.deltaMode===WheelEvent.DOM_DELTA_PAGE?row.clientWidth:1;
+      const delta=event.deltaY*scale;
+      const previous=row.scrollLeft;
+      const next=Math.max(0,Math.min(row.scrollWidth-row.clientWidth,previous+delta));
+      if(next===previous)return;
+      event.preventDefault();
+      row.scrollLeft=next;
+    };
+    row.addEventListener('wheel',handleWheel,{passive:false});
+    return()=>row.removeEventListener('wheel',handleWheel);
+  },[]);
+  return <div ref={ref} className={`folder-row${className?` ${className}`:''}`}>{children}</div>;
 }
