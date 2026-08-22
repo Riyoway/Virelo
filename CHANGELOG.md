@@ -12,6 +12,7 @@
 - Smoothed mouse-wheel movement across overflowing library and folder chip rows.
 - Stabilized audio track switching by preserving the video clock, waiting for audio metadata before seeking, and resuming the audio clock after buffering.
 - Restored playback positions after HLS source switches without reapplying the item's old saved progress.
+- Kept hover previews at the card's original size and removed redundant preview playback controls.
 
 ## 0.1.2 — 2026-08-15
 
