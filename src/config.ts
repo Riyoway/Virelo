@@ -14,7 +14,7 @@ export function defaultDataDir(): string {
 }
 
 export function ensureDataDirs(dataDir: string) {
-  for (const dir of [dataDir, resolve(dataDir, 'thumbnails'), resolve(dataDir, 'artwork'), resolve(dataDir, 'cache'), resolve(dataDir, 'cache', 'hls')]) {
+  for (const dir of [dataDir, resolve(dataDir, 'thumbnails'), resolve(dataDir, 'artwork'), resolve(dataDir, 'cache'), resolve(dataDir, 'cache', 'hls'), resolve(dataDir, 'cache', 'audio')]) {
     mkdirSync(dir, { recursive: true });
   }
 }

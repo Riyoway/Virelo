@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added selectable audio tracks and embedded text subtitles to the video player.
+- Added progressive, audio-only AAC/HLS fallback for AC-3 and other browser-incompatible codecs without re-encoding compatible video.
+- Added cached adaptive HLS playback with Auto bandwidth selection and manual quality controls based on each video's source resolution.
+
 ## 0.1.2 — 2026-08-15
 
 - Added setup-free movie and series metadata matching with automatic poster, backdrop, and episode artwork downloads.

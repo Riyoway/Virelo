@@ -2,6 +2,65 @@ import { spawn } from 'node:child_process';
 import { access } from 'node:fs/promises';
 import { constants } from 'node:fs';
 
+export interface PlaybackTrack {
+  index: number;
+  typeIndex: number;
+  codec: string;
+  language: string | null;
+  title: string | null;
+  channels: number | null;
+  channelLayout: string | null;
+  default: boolean;
+  forced: boolean;
+  supported: boolean;
+}
+
+export interface PlaybackInfo {
+  videoCodec: string | null;
+  width: number | null;
+  height: number | null;
+  qualityOptions: PlaybackQuality[];
+  audioTracks: PlaybackTrack[];
+  subtitleTracks: PlaybackTrack[];
+  defaultAudioStream: number | null;
+  requiresVideoTranscode: boolean;
+  requiresAudioTranscode: boolean;
+  requiresTranscode: boolean;
+}
+
+export interface PlaybackQuality {
+  height: number;
+  label: string;
+  bitrate: number;
+}
+
+const DIRECT_VIDEO_CODECS = new Set(['h264', 'av1', 'vp8', 'vp9']);
+const DIRECT_AUDIO_CODECS = new Set(['aac', 'flac', 'mp3', 'opus', 'vorbis']);
+const TEXT_SUBTITLE_CODECS = new Set(['ass', 'mov_text', 'ssa', 'subrip', 'text', 'webvtt']);
+
+const QUALITY_BITRATES: Record<number, number> = {
+  2160: 12_000_000,
+  1440: 8_000_000,
+  1080: 5_000_000,
+  720: 2_800_000,
+  480: 1_400_000,
+  360: 800_000
+};
+
+export function playbackQualities(width: number | null, height: number | null): PlaybackQuality[] {
+  if (!width || !height) return [];
+  const sourceHeight = Math.max(144, Math.round(Math.min(width, height) / 2) * 2);
+  const standards = [2160, 1440, 1080, 720, 480, 360];
+  const heights = [sourceHeight, ...standards.filter((candidate) => candidate < sourceHeight)]
+    .filter((candidate, index, values) => values.indexOf(candidate) === index)
+    .slice(0, 5);
+  return heights.map((qualityHeight) => ({
+    height: qualityHeight,
+    label: qualityHeight >= 2160 ? '4K' : `${qualityHeight}p`,
+    bitrate: QUALITY_BITRATES[qualityHeight] ?? Math.max(500_000, Math.round(qualityHeight * qualityHeight * 4.3))
+  }));
+}
+
 async function canRun(command: string): Promise<boolean> {
   return await new Promise((resolve) => {
     let child;
@@ -27,14 +86,7 @@ export async function hasFfprobe() {
   return ffprobeAvailable ??= await canRun(process.env.FFPROBE_PATH || 'ffprobe');
 }
 
-export async function probeMedia(path: string): Promise<{
-  duration: number | null;
-  width: number | null;
-  height: number | null;
-  videoCodec: string | null;
-  audioCodec: string | null;
-  container: string | null;
-} | null> {
+async function ffprobeJson(path: string): Promise<any | null> {
   if (!(await hasFfprobe())) return null;
   return await new Promise((resolve) => {
     const chunks: Buffer[] = [];
@@ -49,21 +101,77 @@ export async function probeMedia(path: string): Promise<{
     child.once('error', () => resolve(null));
     child.once('exit', (code) => {
       if (code !== 0) return resolve(null);
-      try {
-        const data = JSON.parse(Buffer.concat(chunks).toString('utf8')) as any;
-        const video = Array.isArray(data.streams) ? data.streams.find((s: any) => s.codec_type === 'video') : null;
-        const audio = Array.isArray(data.streams) ? data.streams.find((s: any) => s.codec_type === 'audio') : null;
-        resolve({
-          duration: Number.isFinite(Number(data.format?.duration)) ? Number(data.format.duration) : null,
-          width: Number.isFinite(Number(video?.width)) ? Number(video.width) : null,
-          height: Number.isFinite(Number(video?.height)) ? Number(video.height) : null,
-          videoCodec: video?.codec_name ?? null,
-          audioCodec: audio?.codec_name ?? null,
-          container: data.format?.format_name?.split(',')[0] ?? null
-        });
-      } catch { resolve(null); }
+      try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }
+      catch { resolve(null); }
     });
   });
+}
+
+export async function probeMedia(path: string): Promise<{
+  duration: number | null;
+  width: number | null;
+  height: number | null;
+  videoCodec: string | null;
+  audioCodec: string | null;
+  container: string | null;
+} | null> {
+  const data = await ffprobeJson(path);
+  if (!data) return null;
+  const video = Array.isArray(data.streams) ? data.streams.find((s: any) => s.codec_type === 'video') : null;
+  const audio = Array.isArray(data.streams) ? data.streams.find((s: any) => s.codec_type === 'audio') : null;
+  return {
+    duration: Number.isFinite(Number(data.format?.duration)) ? Number(data.format.duration) : null,
+    width: Number.isFinite(Number(video?.width)) ? Number(video.width) : null,
+    height: Number.isFinite(Number(video?.height)) ? Number(video.height) : null,
+    videoCodec: video?.codec_name ?? null,
+    audioCodec: audio?.codec_name ?? null,
+    container: data.format?.format_name?.split(',')[0] ?? null
+  };
+}
+
+export async function probePlaybackInfo(path: string): Promise<PlaybackInfo | null> {
+  const data = await ffprobeJson(path);
+  if (!data || !Array.isArray(data.streams)) return null;
+  const video = data.streams.find((stream: any) => stream.codec_type === 'video');
+  let audioTypeIndex = 0;
+  let subtitleTypeIndex = 0;
+  const audioTracks: PlaybackTrack[] = [];
+  const subtitleTracks: PlaybackTrack[] = [];
+  for (const stream of data.streams) {
+    if (stream.codec_type !== 'audio' && stream.codec_type !== 'subtitle') continue;
+    const codec = String(stream.codec_name || 'unknown').toLowerCase();
+    const track: PlaybackTrack = {
+      index: Number(stream.index),
+      typeIndex: stream.codec_type === 'audio' ? audioTypeIndex++ : subtitleTypeIndex++,
+      codec,
+      language: typeof stream.tags?.language === 'string' ? stream.tags.language : null,
+      title: typeof stream.tags?.title === 'string' ? stream.tags.title : null,
+      channels: Number.isFinite(Number(stream.channels)) ? Number(stream.channels) : null,
+      channelLayout: typeof stream.channel_layout === 'string' ? stream.channel_layout : null,
+      default: Boolean(stream.disposition?.default),
+      forced: Boolean(stream.disposition?.forced),
+      supported: stream.codec_type === 'audio' || TEXT_SUBTITLE_CODECS.has(codec)
+    };
+    if (stream.codec_type === 'audio') audioTracks.push(track); else subtitleTracks.push(track);
+  }
+  const defaultAudio = audioTracks.find((track) => track.default) ?? audioTracks[0];
+  const videoCodec = typeof video?.codec_name === 'string' ? video.codec_name.toLowerCase() : null;
+  const width = Number.isFinite(Number(video?.width)) ? Number(video.width) : null;
+  const height = Number.isFinite(Number(video?.height)) ? Number(video.height) : null;
+  const requiresVideoTranscode = Boolean(videoCodec && !DIRECT_VIDEO_CODECS.has(videoCodec));
+  const requiresAudioTranscode = Boolean(defaultAudio && !DIRECT_AUDIO_CODECS.has(defaultAudio.codec));
+  return {
+    videoCodec,
+    width,
+    height,
+    qualityOptions: playbackQualities(width, height),
+    audioTracks,
+    subtitleTracks,
+    defaultAudioStream: defaultAudio?.index ?? null,
+    requiresVideoTranscode,
+    requiresAudioTranscode,
+    requiresTranscode: requiresVideoTranscode || requiresAudioTranscode
+  };
 }
 
 export async function makeThumbnail(source: string, target: string, duration?: number | null): Promise<boolean> {

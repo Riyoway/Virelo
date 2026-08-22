@@ -78,3 +78,35 @@ export interface Settings {
 export interface ScanStatus {
   running:boolean; startedAt:number|null; finishedAt:number|null; total:number; scanned:number; added:number; updated:number; skipped:number; errors:number; message:string;
 }
+
+export interface PlaybackTrack {
+  index: number;
+  typeIndex: number;
+  codec: string;
+  language: string | null;
+  title: string | null;
+  channels: number | null;
+  channelLayout: string | null;
+  default: boolean;
+  forced: boolean;
+  supported: boolean;
+}
+
+export interface PlaybackInfo {
+  videoCodec: string | null;
+  width: number | null;
+  height: number | null;
+  qualityOptions: PlaybackQuality[];
+  audioTracks: PlaybackTrack[];
+  subtitleTracks: PlaybackTrack[];
+  defaultAudioStream: number | null;
+  requiresVideoTranscode: boolean;
+  requiresAudioTranscode: boolean;
+  requiresTranscode: boolean;
+}
+
+export interface PlaybackQuality {
+  height: number;
+  label: string;
+  bitrate: number;
+}

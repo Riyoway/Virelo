@@ -138,7 +138,9 @@ Virelo works without FFmpeg for formats supported by the browser. Installing `ff
 
 - thumbnails and media probing
 - codec detection
-- HLS fallback for formats browsers cannot play directly
+- selectable audio tracks and embedded text subtitles
+- progressive audio-only AAC/HLS fallback for incompatible audio, without re-encoding video the browser can already play
+- Auto video quality that adapts to network conditions, plus manual resolution selection up to the source quality
 
 Virelo can automatically match filenames to movie and series metadata, then cache posters, backdrops, and episode artwork locally. Configure this from **Settings → Network**. Source video files are never sent to the metadata provider.
 
