@@ -1,6 +1,6 @@
 {
   "name": "virelo",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "Turn any folder into a private, streaming-style video library.",
   "type": "module",
   "bin": {
