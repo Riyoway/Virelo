@@ -7,6 +7,7 @@
 - Added cached adaptive HLS playback with Auto bandwidth selection and manual quality controls based on each video's source resolution.
 - Fixed playback duration and saved progress while switching adaptive quality levels.
 - Made localhost playback direct-play the original file without preparing adaptive variants; LAN playback still defaults to Auto.
+- Remembered the selected quality between videos and capped it at each video's source resolution instead of upscaling.
 
 ## 0.1.2 — 2026-08-15
 

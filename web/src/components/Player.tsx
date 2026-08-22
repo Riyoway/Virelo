@@ -21,6 +21,7 @@ interface PlayerProps {
 }
 
 const DIRECT_AUDIO_CODECS=new Set(['aac','flac','mp3','opus','vorbis']);
+const QUALITY_PREFERENCE_KEY='virelo-playback-quality';
 type HlsInstance=InstanceType<(typeof import('hls.js/light'))['default']>;
 
 export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=true,canGoPrev=true,autoPlay}:PlayerProps) {
@@ -81,8 +82,10 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
       if(!alive)return;
       setPlaybackInfo(info);
       setSelectedAudio(info.defaultAudioStream);
-      setQuality(localPlayback?(info.qualityOptions[0]?.height??null):null);
-      if(localPlayback){
+      const preferredQuality=resolvePreferredQuality(info.qualityOptions,readQualityPreference(localPlayback));
+      setQuality(preferredQuality);
+      const directLocalPlayback=localPlayback&&(!info.qualityOptions.length||preferredQuality===info.qualityOptions[0]?.height);
+      if(directLocalPlayback){
         qualityRequested.current=false;
         if(info.requiresAudioTranscode&&info.defaultAudioStream!==null){
           await prepareAudio(info.defaultAudioStream,info,true,true);
@@ -256,6 +259,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
   }
 
   async function selectQuality(height:number|null){
+    saveQualityPreference(height);
     setQuality(height);
     if(!localPlayback||qualityState==='active'||qualityState==='starting'||height===playbackInfo?.qualityOptions[0]?.height)return;
     const video=videoRef.current;
@@ -384,3 +388,22 @@ function time(value:number){if(!Number.isFinite(value))return '0:00';const h=Mat
 function fullDuration(...values:Array<number|null|undefined>){return Math.max(0,...values.filter((value):value is number=>typeof value==='number'&&Number.isFinite(value)&&value>0));}
 function isLocalPlaybackHost(){return ['localhost','127.0.0.1','::1','[::1]'].includes(window.location.hostname.toLowerCase());}
 function qualityLabel(height:number){return height>=2160?'4K':`${height}p`;}
+type QualityPreference='auto'|'source'|number;
+function readQualityPreference(localPlayback:boolean):QualityPreference{
+  try{
+    const stored=window.localStorage.getItem(QUALITY_PREFERENCE_KEY);
+    if(stored==='auto')return localPlayback?'source':'auto';
+    const height=Number(stored);
+    if(Number.isFinite(height)&&height>0)return height;
+  }catch{/* use the host default */}
+  return localPlayback?'source':'auto';
+}
+function saveQualityPreference(height:number|null){
+  try{window.localStorage.setItem(QUALITY_PREFERENCE_KEY,height===null?'auto':String(height));}catch{/* keep the current session */}
+}
+function resolvePreferredQuality(qualities:PlaybackInfo['qualityOptions'],preference:QualityPreference){
+  if(preference==='auto')return null;
+  if(!qualities.length)return null;
+  if(preference==='source')return qualities[0].height;
+  return qualities.find((quality)=>quality.height<=preference)?.height??qualities.at(-1)?.height??null;
+}
