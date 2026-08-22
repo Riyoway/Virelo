@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.2.1 — 2026-08-22
+
+- Fixed first-play audio fallback starting before FFmpeg had finished writing the converted HLS playlist.
+- Stabilized converted audio playback by retrying audio start and resynchronizing it with the video clock.
+
 ## 0.2.0 — 2026-08-22
 
 - Added selectable audio tracks and embedded text subtitles to the video player.

@@ -169,8 +169,10 @@ export async function startHlsTranscode(dataDir:string,id:number,source:string,o
 }
 
 export function audioTranscodeStatus(dataDir:string,id:number,audioStream:number):AudioTranscodeState {
+  const job=audioJobs.get(`${id}:${audioStream}`);
+  if(job)return job.state;
   if (existsSync(audioPlaylist(dataDir,id,audioStream))) return {status:'ready',url:audioUrl(id,audioStream)};
-  return audioJobs.get(`${id}:${audioStream}`)?.state || {status:'idle',url:audioUrl(id,audioStream)};
+  return {status:'idle',url:audioUrl(id,audioStream)};
 }
 
 export async function startAudioTranscode(dataDir:string,id:number,source:string,audioStream:number):Promise<AudioTranscodeState> {

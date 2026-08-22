@@ -37,6 +37,8 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
   const audioHlsRef = useRef<HlsInstance|null>(null);
   const resumeAfterAudio = useRef(false);
   const audioResumeAt = useRef<number|null>(null);
+  const audioRetryTimer = useRef<number|null>(null);
+  const audioRetryCount = useRef(0);
   const initialResumeItem = useRef<number|null>(null);
   const videoFallbackRequested = useRef(false);
   const qualityRequested = useRef(true);
@@ -66,6 +68,9 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
     videoFallbackRequested.current=false;
     qualityRequested.current=true;
     audioRef.current?.pause();
+    if(audioRetryTimer.current!==null)window.clearTimeout(audioRetryTimer.current);
+    audioRetryTimer.current=null;
+    audioRetryCount.current=0;
     resumeAfterAudio.current=false;
     audioResumeAt.current=null;
     initialResumeItem.current=null;
@@ -159,7 +164,8 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
         resumeAfterAudio.current=false;
         window.requestAnimationFrame(()=>{
           if(disposed||sourceToken!==audioSourceToken.current)return;
-          void videoRef.current?.play().catch(()=>{resumeAfterAudio.current=true;});
+          const playPromise=videoRef.current?.play();
+          if(playPromise)void playPromise.then(()=>requestExternalAudioPlayback()).catch(()=>{resumeAfterAudio.current=true;});
         });
       }
     };
@@ -189,12 +195,16 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
       audioHlsRef.current=hls;
       hls.loadSource(externalAudioUrl);
       hls.attachMedia(audio);
+      hls.on(Hls.Events.FRAG_BUFFERED,handleReady);
       hls.on(Hls.Events.ERROR,(_event,data)=>{if(data.fatal)setAudioError('Converted audio playback failed.');});
     }).catch((reason)=>{if(!disposed)setAudioError(reason instanceof Error?reason.message:'Converted audio playback failed.');});
     return()=>{
       disposed=true;
       audio.removeEventListener('loadedmetadata',handleReady);
       audio.removeEventListener('canplay',handleReady);
+      audioRetryCount.current=0;
+      if(audioRetryTimer.current!==null)window.clearTimeout(audioRetryTimer.current);
+      audioRetryTimer.current=null;
       audioHlsRef.current?.destroy();
       audioHlsRef.current=null;
     };
@@ -241,9 +251,38 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
       try{audio.currentTime=position;}catch{/* wait for metadata before seeking */}
     }
     try{audio.playbackRate=video.playbackRate;}catch{/* the audio source is still loading */}
-    if(play&&audio.paused&&audio.readyState>=HTMLMediaElement.HAVE_METADATA)void audio.play().catch(()=>{});
+    if(play)requestExternalAudioPlayback();
   }
-  function toggle(){const v=videoRef.current;if(!v||audioPreparing)return;if(v.paused)void v.play();else v.pause();}
+  function requestExternalAudioPlayback(){
+    const video=videoRef.current;const audio=audioRef.current;
+    if(!video||!audio||!externalAudioUrl||video.paused||audio.readyState<HTMLMediaElement.HAVE_METADATA)return;
+    if(!audio.paused)return;
+    const result=audio.play();
+    if(!result)return;
+    void result.then(()=>{
+      audioRetryCount.current=0;
+      if(audioRetryTimer.current!==null)window.clearTimeout(audioRetryTimer.current);
+      audioRetryTimer.current=null;
+    }).catch(()=>{
+      if(videoRef.current!==video||audioRef.current!==audio||video.paused||!externalAudioUrl)return;
+      if(audioRetryCount.current>=8)return;
+      audioRetryCount.current++;
+      if(audioRetryTimer.current!==null)return;
+      audioRetryTimer.current=window.setTimeout(()=>{
+        audioRetryTimer.current=null;
+        requestExternalAudioPlayback();
+      },150);
+    });
+  }
+  function toggle(){
+    const v=videoRef.current;
+    if(!v||audioPreparing)return;
+    if(v.paused){
+      audioRetryCount.current=0;
+      const result=v.play();
+      if(result)void result.then(()=>requestExternalAudioPlayback()).catch(()=>{});
+    }else v.pause();
+  }
   function handleVideoClick(){if(usesTouchControls()&&!controlsVisible){revealControls();return;}toggle();revealControls();}
   function seek(value:number){const v=videoRef.current;if(!v)return;v.currentTime=value;if(audioRef.current&&externalAudioUrl){try{audioRef.current.currentTime=value;}catch{audioResumeAt.current=value;}}setCurrent(value);}
   function seekBy(seconds:number){const v=videoRef.current;if(!v)return;seek(Math.max(0,Math.min(v.duration || duration,current + seconds)));}
@@ -355,10 +394,10 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
       autoPlay={false}
       crossOrigin="anonymous"
       onClick={handleVideoClick}
-      onPlay={()=>{setPlaying(true);syncExternalAudio(true);revealControls();scheduleControlsHide();}}
+      onPlay={()=>{setPlaying(true);syncExternalAudio(true);requestExternalAudioPlayback();revealControls();scheduleControlsHide();}}
       onPlaying={()=>syncExternalAudio(true)}
       onWaiting={()=>audioRef.current?.pause()}
-      onPause={(e)=>{audioRef.current?.pause();setPlaying(false);revealControls();const v=e.currentTarget;void api.progress(playbackItemId.current,v.currentTime,fullDuration(v.duration,item.duration,duration));}}
+      onPause={(e)=>{audioRef.current?.pause();if(audioRetryTimer.current!==null)window.clearTimeout(audioRetryTimer.current);audioRetryTimer.current=null;audioRetryCount.current=0;setPlaying(false);revealControls();const v=e.currentTarget;void api.progress(playbackItemId.current,v.currentTime,fullDuration(v.duration,item.duration,duration));}}
       onLoadedMetadata={(e)=>{
         const v=e.currentTarget;playbackItemId.current=item.id;setDuration(fullDuration(v.duration,item.duration));
         if(initialResumeItem.current!==item.id){
