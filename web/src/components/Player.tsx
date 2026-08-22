@@ -82,6 +82,16 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
       setPlaybackInfo(info);
       setSelectedAudio(info.defaultAudioStream);
       setQuality(localPlayback?(info.qualityOptions[0]?.height??null):null);
+      if(localPlayback){
+        qualityRequested.current=false;
+        if(info.requiresAudioTranscode&&info.defaultAudioStream!==null){
+          await prepareAudio(info.defaultAudioStream,info,true,true);
+        }else{
+          setPlaybackReady(true);
+          if(autoPlay)void videoRef.current?.play().catch(()=>{});
+        }
+        return;
+      }
       const adaptiveReady=await startQuality(info.defaultAudioStream??undefined,item.progress_position||0,Boolean(autoPlay));
       if(!alive)return;
       if(adaptiveReady){
@@ -202,7 +212,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
     setSelectedAudio(stream);
     setAudioError('');
 
-    if(!skipAdaptive&&info.qualityOptions.length){
+    if(!skipAdaptive&&info.qualityOptions.length&&(!localPlayback||qualityState==='active')){
       qualityRequested.current=true;
       video?.pause();
       audioRef.current?.pause();
@@ -243,6 +253,22 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
     }finally{
       if(token===audioToken.current)setAudioPreparing(false);
     }
+  }
+
+  async function selectQuality(height:number|null){
+    setQuality(height);
+    if(!localPlayback||qualityState==='active'||qualityState==='starting'||height===playbackInfo?.qualityOptions[0]?.height)return;
+    const video=videoRef.current;
+    const shouldResume=Boolean(video&&!video.paused);
+    qualityRequested.current=true;
+    video?.pause();
+    setPlaybackReady(false);
+    const ready=await startQuality(selectedAudio??undefined,video?.currentTime||current,shouldResume);
+    if(ready){setPlaybackReady(true);return;}
+    qualityRequested.current=false;
+    setQuality(playbackInfo?.qualityOptions[0]?.height??null);
+    setPlaybackReady(true);
+    if(shouldResume)void videoRef.current?.play().catch(()=>{});
   }
 
   function prepareCompatibleVideo(){
@@ -301,7 +327,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
       if(resumeAfterAudio.current){resumeAfterAudio.current=false;void videoRef.current?.play().catch(()=>{});}
     }}/>
     <DraggableCaption key={`${item.id}:${selectedSubtitle}`} text={activeCaption} controlsVisible={controlsVisible} containerRef={containerRef} onDraggingChange={(dragging)=>{if(dragging)revealControls();else window.setTimeout(scheduleControlsHide,0);}}/>
-    {qualityState==='starting'&&<div className="player-status"><SpinnerGap className="spin"/><strong>Preparing Auto quality…</strong><span>Creating network-adaptive versions. They will be reused next time.</span></div>}
+    {qualityState==='starting'&&<div className="player-status"><SpinnerGap className="spin"/><strong>{selectedQuality===null?'Preparing Auto quality…':`Preparing ${qualityLabel(selectedQuality)}…`}</strong><span>Creating network-adaptive versions. They will be reused next time.</span></div>}
     {audioPreparing&&<div className="player-status"><SpinnerGap className="spin"/><strong>Preparing audio…</strong><span>Only the audio track is being converted. The cached result will be reused.</span></div>}
     {fallback==='starting' && <div className="player-status"><SpinnerGap className="spin"/><strong>Preparing video…</strong><span>The original video codec is not supported by this browser.</span></div>}
     {(fallback==='error'||audioError||(qualityState==='error'&&qualityRequested.current)) && <div className="player-status error"><strong>Playback unavailable</strong><span>{audioError||error||qualityError}</span></div>}
@@ -331,7 +357,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
           busy={qualityState==='starting'||audioPreparing||fallback==='starting'}
           onSelectAudio={(stream)=>void prepareAudio(stream)}
           onSelectSubtitle={setSelectedSubtitle}
-          onSelectQuality={setQuality}
+          onSelectQuality={(height)=>void selectQuality(height)}
         />}
         {pipSupported && <button onClick={()=>void togglePip()} aria-label={pip?'Exit Picture in Picture':'Picture in Picture'} className={pip?'active':''}>{pip?<PictureInPicture weight="fill"/>:<PictureInPicture/>}</button>}
         <button onClick={()=>void fullscreen()} aria-label="Fullscreen"><ArrowsOut/></button>
@@ -357,3 +383,4 @@ async function waitForAudio(mediaId:number,audioStream:number,cancelled:()=>bool
 function time(value:number){if(!Number.isFinite(value))return '0:00';const h=Math.floor(value/3600);const m=Math.floor(value%3600/60);const s=Math.floor(value%60);return h?`${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`:`${m}:${String(s).padStart(2,'0')}`;}
 function fullDuration(...values:Array<number|null|undefined>){return Math.max(0,...values.filter((value):value is number=>typeof value==='number'&&Number.isFinite(value)&&value>0));}
 function isLocalPlaybackHost(){return ['localhost','127.0.0.1','::1','[::1]'].includes(window.location.hostname.toLowerCase());}
+function qualityLabel(height:number){return height>=2160?'4K':`${height}p`;}
