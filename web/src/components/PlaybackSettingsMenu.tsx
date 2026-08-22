@@ -11,6 +11,7 @@ interface PlaybackSettingsMenuProps {
   qualityOptions: PlaybackQuality[];
   selectedQuality: number|null;
   activeQuality: number|null;
+  allowAutoQuality?: boolean;
   onSelectAudio: (stream: number) => void;
   onSelectSubtitle: (stream: number|null) => void;
   onSelectQuality: (height: number|null) => void;
@@ -25,6 +26,7 @@ export function PlaybackSettingsMenu({
   qualityOptions,
   selectedQuality,
   activeQuality,
+  allowAutoQuality=true,
   onSelectAudio,
   onSelectSubtitle,
   onSelectQuality
@@ -59,10 +61,10 @@ export function PlaybackSettingsMenu({
       {qualityOptions.length>0&&<section>
         <h3><MonitorPlay/>Quality</h3>
         <div className="playback-track-list">
-          <button type="button" role="menuitemradio" aria-checked={selectedQuality===null} className={selectedQuality===null?'selected':''} disabled={busy} onClick={()=>{onSelectQuality(null);setOpen(false);}}>
+          {allowAutoQuality&&<button type="button" role="menuitemradio" aria-checked={selectedQuality===null} className={selectedQuality===null?'selected':''} disabled={busy} onClick={()=>{onSelectQuality(null);setOpen(false);}}>
             <span><strong>Auto</strong><small>{activeQuality?`Playing at ${qualityLabel(activeQuality)}`:'Adjusts to your network'}</small></span>
             {selectedQuality===null&&<Check weight="bold"/>}
-          </button>
+          </button>}
           {qualityOptions.map((quality)=><button type="button" role="menuitemradio" aria-checked={selectedQuality===quality.height} className={selectedQuality===quality.height?'selected':''} disabled={busy} key={quality.height} onClick={()=>{onSelectQuality(quality.height);setOpen(false);}}>
             <span><strong>{quality.label}</strong><small>{quality===qualityOptions[0]?'Highest available':formatBitrate(quality.bitrate)}</small></span>
             {selectedQuality===quality.height&&<Check weight="bold"/>}

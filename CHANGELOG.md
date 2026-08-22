@@ -5,6 +5,8 @@
 - Added selectable audio tracks and embedded text subtitles to the video player.
 - Added progressive, audio-only AAC/HLS fallback for AC-3 and other browser-incompatible codecs without re-encoding compatible video.
 - Added cached adaptive HLS playback with Auto bandwidth selection and manual quality controls based on each video's source resolution.
+- Fixed playback duration and saved progress while switching adaptive quality levels.
+- Defaulted localhost playback to the highest source quality while keeping Auto as the network playback default.
 
 ## 0.1.2 — 2026-08-15
 

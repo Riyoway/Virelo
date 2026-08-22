@@ -24,6 +24,7 @@ const DIRECT_AUDIO_CODECS=new Set(['aac','flac','mp3','opus','vorbis']);
 type HlsInstance=InstanceType<(typeof import('hls.js/light'))['default']>;
 
 export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=true,canGoPrev=true,autoPlay}:PlayerProps) {
+  const localPlayback=isLocalPlaybackHost();
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -80,6 +81,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
       if(!alive)return;
       setPlaybackInfo(info);
       setSelectedAudio(info.defaultAudioStream);
+      setQuality(localPlayback?(info.qualityOptions[0]?.height??null):null);
       const adaptiveReady=await startQuality(info.defaultAudioStream??undefined,item.progress_position||0,Boolean(autoPlay));
       if(!alive)return;
       if(adaptiveReady){
@@ -100,7 +102,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
       if(autoPlay)void videoRef.current?.play().catch(()=>{});
     });
     return()=>{alive=false;audioToken.current++;};
-  },[autoPlay,item.id,item.progress_position,startQuality]);
+  },[autoPlay,item.id,item.progress_position,localPlayback,setQuality,startQuality]);
 
   useEffect(()=>{setActiveCaption('');},[item.id,selectedSubtitle]);
 
@@ -269,19 +271,20 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
       onPlay={()=>{setPlaying(true);syncExternalAudio(true);revealControls();scheduleControlsHide();}}
       onPlaying={()=>syncExternalAudio(true)}
       onWaiting={()=>audioRef.current?.pause()}
-      onPause={(e)=>{audioRef.current?.pause();setPlaying(false);revealControls();const v=e.currentTarget;void api.progress(playbackItemId.current,v.currentTime,v.duration||duration);}}
+      onPause={(e)=>{audioRef.current?.pause();setPlaying(false);revealControls();const v=e.currentTarget;void api.progress(playbackItemId.current,v.currentTime,fullDuration(v.duration,item.duration,duration));}}
       onLoadedMetadata={(e)=>{
-        const v=e.currentTarget;playbackItemId.current=item.id;setDuration(v.duration||item.duration||0);
+        const v=e.currentTarget;playbackItemId.current=item.id;setDuration(fullDuration(v.duration,item.duration));
         const resume=item.progress_position||0;
         if(resume>5 && (!v.duration || resume < v.duration*.92)) v.currentTime=resume;
       }}
+      onDurationChange={(e)=>setDuration(fullDuration(e.currentTarget.duration,item.duration,duration))}
       onCanPlay={(e)=>{if(autoPlay&&playbackReady&&e.currentTarget.paused)void e.currentTarget.play().catch(()=>{});}}
       onTimeUpdate={(e)=>{
         const v=e.currentTarget;setCurrent(v.currentTime);syncExternalAudio(!v.paused);
-        if(Math.abs(v.currentTime-lastProgress.current)>5){lastProgress.current=v.currentTime;void api.progress(playbackItemId.current,v.currentTime,v.duration||duration);}
+        if(Math.abs(v.currentTime-lastProgress.current)>5){lastProgress.current=v.currentTime;void api.progress(playbackItemId.current,v.currentTime,fullDuration(v.duration,item.duration,duration));}
       }}
       onRateChange={()=>syncExternalAudio(false)}
-      onEnded={(e)=>{audioRef.current?.pause();void api.progress(playbackItemId.current,e.currentTarget.duration,e.currentTarget.duration);onEnded?.();}}
+      onEnded={(e)=>{audioRef.current?.pause();const total=fullDuration(e.currentTarget.duration,item.duration,duration);void api.progress(playbackItemId.current,total,total);onEnded?.();}}
       onError={prepareCompatibleVideo}
     >
       {selectedSubtitle!==null&&<HiddenSubtitleTrack
@@ -324,6 +327,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
           qualityOptions={qualityOptions.length?qualityOptions:playbackInfo.qualityOptions}
           selectedQuality={selectedQuality}
           activeQuality={activeQuality}
+          allowAutoQuality={!localPlayback}
           busy={qualityState==='starting'||audioPreparing||fallback==='starting'}
           onSelectAudio={(stream)=>void prepareAudio(stream)}
           onSelectSubtitle={setSelectedSubtitle}
@@ -351,3 +355,5 @@ async function waitForAudio(mediaId:number,audioStream:number,cancelled:()=>bool
 }
 
 function time(value:number){if(!Number.isFinite(value))return '0:00';const h=Math.floor(value/3600);const m=Math.floor(value%3600/60);const s=Math.floor(value%60);return h?`${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`:`${m}:${String(s).padStart(2,'0')}`;}
+function fullDuration(...values:Array<number|null|undefined>){return Math.max(0,...values.filter((value):value is number=>typeof value==='number'&&Number.isFinite(value)&&value>0));}
+function isLocalPlaybackHost(){return ['localhost','127.0.0.1','::1','[::1]'].includes(window.location.hostname.toLowerCase());}
