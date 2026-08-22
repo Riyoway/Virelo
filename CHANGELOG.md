@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.1.3 — 2026-08-22
+
 - Added selectable audio tracks and embedded text subtitles to the video player.
 - Added progressive, audio-only AAC/HLS fallback for AC-3 and other browser-incompatible codecs without re-encoding compatible video.
 - Added cached adaptive HLS playback with Auto bandwidth selection and manual quality controls based on each video's source resolution.
