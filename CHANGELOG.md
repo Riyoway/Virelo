@@ -9,6 +9,7 @@
 - Made localhost playback direct-play the original file without preparing adaptive variants; LAN playback still defaults to Auto.
 - Remembered the selected quality between videos and capped it at each video's source resolution instead of upscaling.
 - Made overflowing library and folder chips scroll horizontally with a mouse wheel while preserving native trackpad and touch scrolling.
+- Smoothed mouse-wheel movement across overflowing library and folder chip rows.
 
 ## 0.1.2 — 2026-08-15
 

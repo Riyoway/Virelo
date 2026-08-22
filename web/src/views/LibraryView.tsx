@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { Button } from '@heroui/react';
@@ -7,6 +7,7 @@ import { api } from '../api';
 import { useUIStore } from '../store';
 import { MediaCard } from '../components/MediaCard';
 import { Select } from '../components/Select';
+import { useRowWheel } from '../hooks/useRowWheel';
 import type { Library, SortKey } from '../types';
 
 const SORT_OPTIONS = [
@@ -110,21 +111,6 @@ export function LibraryView() {
 
 function FolderRow({children,className=''}:{children:ReactNode;className?:string}){
   const ref=useRef<HTMLDivElement>(null);
-  useEffect(()=>{
-    const row=ref.current;
-    if(!row)return;
-    const handleWheel=(event:WheelEvent)=>{
-      if(Math.abs(event.deltaY)<=Math.abs(event.deltaX)||row.scrollWidth<=row.clientWidth)return;
-      const scale=event.deltaMode===WheelEvent.DOM_DELTA_LINE?16:event.deltaMode===WheelEvent.DOM_DELTA_PAGE?row.clientWidth:1;
-      const delta=event.deltaY*scale;
-      const previous=row.scrollLeft;
-      const next=Math.max(0,Math.min(row.scrollWidth-row.clientWidth,previous+delta));
-      if(next===previous)return;
-      event.preventDefault();
-      row.scrollLeft=next;
-    };
-    row.addEventListener('wheel',handleWheel,{passive:false});
-    return()=>row.removeEventListener('wheel',handleWheel);
-  },[]);
+  useRowWheel(ref);
   return <div ref={ref} className={`folder-row${className?` ${className}`:''}`}>{children}</div>;
 }
