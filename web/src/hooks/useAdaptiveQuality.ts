@@ -8,6 +8,8 @@ type HlsInstance=InstanceType<(typeof import('hls.js/light'))['default']>;
 export function useAdaptiveQuality(item:MediaItem,videoRef:RefObject<HTMLVideoElement|null>){
   const hlsRef=useRef<HlsInstance|null>(null);
   const requestToken=useRef(0);
+  const restoreToken=useRef(0);
+  const restoreCleanupRef=useRef<(()=>void)|null>(null);
   const variantsRef=useRef<QualityTranscodeState['variants']>([]);
   const selectedRef=useRef<number|null>(null);
   const [state,setState]=useState<AdaptiveState>('idle');
@@ -16,7 +18,13 @@ export function useAdaptiveQuality(item:MediaItem,videoRef:RefObject<HTMLVideoEl
   const [activeQuality,setActiveQuality]=useState<number|null>(null);
   const [qualityOptions,setQualityOptions]=useState<PlaybackQuality[]>([]);
 
-  const destroy=useCallback(()=>{hlsRef.current?.destroy();hlsRef.current=null;},[]);
+  const destroy=useCallback(()=>{
+    restoreToken.current++;
+    restoreCleanupRef.current?.();
+    restoreCleanupRef.current=null;
+    hlsRef.current?.destroy();
+    hlsRef.current=null;
+  },[]);
   useEffect(()=>destroy,[destroy]);
   useEffect(()=>{
     requestToken.current++;
@@ -44,11 +52,29 @@ export function useAdaptiveQuality(item:MediaItem,videoRef:RefObject<HTMLVideoEl
     variantsRef.current=result.variants;
     setQualityOptions(result.variants);
     destroy();
+    const attachToken=restoreToken.current;
+    let restored=false;
+    let cleanupRestore=()=>{};
     const restore=()=>{
-      if(Number.isFinite(resumeAt)&&resumeAt>0)video.currentTime=resumeAt;
+      if(restored||attachToken!==restoreToken.current||video.readyState<HTMLMediaElement.HAVE_METADATA)return;
+      const maxTime=Number.isFinite(video.duration)&&video.duration>0?video.duration:resumeAt;
+      const position=Math.min(Math.max(resumeAt,0),Math.max(0,maxTime-0.05));
+      try{video.currentTime=position;}catch{/* the media element is not seekable yet */}
+      restored=true;
+      cleanupRestore();
       setState('active');
       if(shouldPlay)void video.play().catch(()=>{});
     };
+    cleanupRestore=()=>{
+      video.removeEventListener('loadedmetadata',restore);
+      video.removeEventListener('durationchange',restore);
+      video.removeEventListener('canplay',restore);
+      if(restoreCleanupRef.current===cleanupRestore)restoreCleanupRef.current=null;
+    };
+    restoreCleanupRef.current=cleanupRestore;
+    video.addEventListener('loadedmetadata',restore);
+    video.addEventListener('durationchange',restore);
+    video.addEventListener('canplay',restore);
     try{
       const {default:Hls}=await import('hls.js/light');
       if(Hls.isSupported()){
@@ -78,6 +104,7 @@ export function useAdaptiveQuality(item:MediaItem,videoRef:RefObject<HTMLVideoEl
       }
       throw new Error('This browser cannot play adaptive HLS video.');
     }catch(reason){
+      cleanupRestore();
       setError(reason instanceof Error?reason.message:'Adaptive playback failed.');
       setState('error');
       return false;

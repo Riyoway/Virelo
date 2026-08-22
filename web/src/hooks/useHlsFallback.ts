@@ -8,6 +8,8 @@ type HlsInstance = InstanceType<(typeof import('hls.js/light'))['default']>;
 export function useHlsFallback(item: MediaItem, videoRef: RefObject<HTMLVideoElement | null>) {
   const hlsRef = useRef<HlsInstance|null>(null);
   const fallbackTimer = useRef<number|null>(null);
+  const restoreToken = useRef(0);
+  const restoreCleanupRef = useRef<(()=>void)|null>(null);
   const stateRef = useRef<FallbackState>('idle');
   const variantRef = useRef<number|null>(null);
   const [fallback, setFallbackState] = useState<FallbackState>('idle');
@@ -20,6 +22,9 @@ export function useHlsFallback(item: MediaItem, videoRef: RefObject<HTMLVideoEle
   }, []);
 
   const stopCurrent = useCallback(() => {
+    restoreToken.current++;
+    restoreCleanupRef.current?.();
+    restoreCleanupRef.current=null;
     hlsRef.current?.destroy();
     hlsRef.current = null;
     if (fallbackTimer.current !== null) window.clearInterval(fallbackTimer.current);
@@ -39,16 +44,34 @@ export function useHlsFallback(item: MediaItem, videoRef: RefObject<HTMLVideoEle
   const attachHls = useCallback(async (url: string, audioStream: number|null, resumeAt: number, shouldPlay: boolean) => {
     const video = videoRef.current;
     if (!video) return;
+    stopCurrent();
+    const attachToken=restoreToken.current;
+    let restored=false;
+    let cleanupRestore=()=>{};
     const restorePlayback = () => {
-      if (Number.isFinite(resumeAt) && resumeAt > 0) video.currentTime = resumeAt;
+      if (restored||attachToken!==restoreToken.current||video.readyState<HTMLMediaElement.HAVE_METADATA)return;
+      const maxTime=Number.isFinite(video.duration)&&video.duration>0?video.duration:resumeAt;
+      const position=Math.min(Math.max(resumeAt,0),Math.max(0,maxTime-0.05));
+      try{video.currentTime=position;}catch{/* the media element is not seekable yet */}
+      restored=true;
+      cleanupRestore();
       setActiveAudioStream(audioStream);
       setState('active');
       if (shouldPlay) void video.play().catch(() => {});
     };
-    hlsRef.current?.destroy();
+    cleanupRestore=()=>{
+      video.removeEventListener('loadedmetadata',restorePlayback);
+      video.removeEventListener('durationchange',restorePlayback);
+      video.removeEventListener('canplay',restorePlayback);
+      if(restoreCleanupRef.current===cleanupRestore)restoreCleanupRef.current=null;
+    };
+    restoreCleanupRef.current=cleanupRestore;
+    video.addEventListener('loadedmetadata',restorePlayback);
+    video.addEventListener('durationchange',restorePlayback);
+    video.addEventListener('canplay',restorePlayback);
     if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = url;
-      video.addEventListener('loadedmetadata', restorePlayback, { once: true });
+      video.load();
       return;
     }
     try {
@@ -65,10 +88,11 @@ export function useHlsFallback(item: MediaItem, videoRef: RefObject<HTMLVideoEle
         setState('error');
       });
     } catch (reason) {
+      cleanupRestore();
       setError(reason instanceof Error ? reason.message : 'This browser cannot play HLS.');
       setState('error');
     }
-  }, [setState, videoRef]);
+  }, [setState, stopCurrent, videoRef]);
 
   const startFallback = useCallback(async (audioStream?: number, resumeAt?: number, shouldPlay?: boolean) => {
     const requestedStream = audioStream ?? null;

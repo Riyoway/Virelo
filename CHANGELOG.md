@@ -10,6 +10,8 @@
 - Remembered the selected quality between videos and capped it at each video's source resolution instead of upscaling.
 - Made overflowing library and folder chips scroll horizontally with a mouse wheel while preserving native trackpad and touch scrolling.
 - Smoothed mouse-wheel movement across overflowing library and folder chip rows.
+- Stabilized audio track switching by preserving the video clock, waiting for audio metadata before seeking, and resuming the audio clock after buffering.
+- Restored playback positions after HLS source switches without reapplying the item's old saved progress.
 
 ## 0.1.2 — 2026-08-15
 
