@@ -1,5 +1,6 @@
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import { parseMediaName } from './scanner.js';
 import type { AppSettings, FolderEntry, Library, MediaRecord, MediaKind, ShortsFeed, ShortsItem, SortKey } from './types.js';
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -241,6 +242,19 @@ export class VireloDB {
     this.db.prepare(`UPDATE media SET title=?,sort_title=?,year=?,overview=NULL,genres=NULL,poster_path=NULL,backdrop_path=NULL,external_id=NULL,metadata_blocked=1,metadata_revision=metadata_revision+1,updated_at=? WHERE id=?`)
       .run(parsed.title, parsed.title.toLowerCase(), parsed.year, Date.now(), id);
     return this.getMedia(id);
+  }
+
+  clearAllExternalMetadata() {
+    const rows = this.db.prepare('SELECT id,path FROM media').all() as Array<{id:number;path:string}>;
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const row of rows) this.clearExternalMetadata(row.id, parseMediaName(row.path));
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+    return { cleared: rows.length };
   }
 
   deleteMissingForLibrary(libraryId: number, existingPaths: Set<string>) {

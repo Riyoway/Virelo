@@ -322,6 +322,8 @@ export async function createVireloServer(config: RuntimeConfig) {
     return { ok: true, liked };
   });
 
+  app.delete('/api/metadata', async () => db.clearAllExternalMetadata());
+
   app.delete<{ Params: { id: string } }>('/api/media/:id/metadata', async (request, reply) => {
     const media = db.getMedia(Number(request.params.id));
     if (!media) return reply.code(404).send({ error: 'Media not found.' });

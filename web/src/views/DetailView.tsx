@@ -18,13 +18,6 @@ export function DetailView() {
     enabled:Boolean(item)
   });
   const refresh = useMutation({mutationFn:()=>api.refreshMetadata(id),onSuccess:(media)=>{client.setQueryData(['media',id],media);void client.invalidateQueries({predicate:(query)=>['home','media','related','shorts','watch-queue','queue','search'].includes(String(query.queryKey[0]))});}});
-  const clear = useMutation({
-    mutationFn: () => api.clearMetadata(id),
-    onSuccess: (media) => {
-      client.setQueryData(['media', id], media);
-      void client.invalidateQueries({ predicate: (query) => ['home', 'media', 'related', 'shorts', 'watch-queue', 'queue', 'search'].includes(String(query.queryKey[0])) });
-    }
-  });
   if (loadError) return <div className="watch-empty"><h1>Video unavailable</h1><p>{loadError.message}</p><Button variant="secondary" onPress={()=>void refetch()}>Try again</Button></div>;
   if (isLoading || !item) return <div className="detail-loading skeleton"/>;
   const isPortrait = Boolean(item.width && item.height && item.height > item.width);
@@ -42,9 +35,6 @@ export function DetailView() {
           {item.genres && <div className="genre-line">{item.genres.split(',').map(g=><span key={g}>{g.trim()}</span>)}</div>}
           <div className="detail-actions"><Button size="lg" onPress={()=>void navigate({to:'/watch/$mediaId',params:{mediaId}})}><Play weight="fill"/> {canResume(item) ? `Resume ${formatTime(item.progress_position || 0)}` : 'Play'}</Button>{settings?.externalMetadataEnabled && <Button size="lg" variant="secondary" isPending={refresh.isPending} onPress={()=>refresh.mutate()}><ArrowsClockwise/> Fetch metadata</Button>}</div>
           {refresh.error && <p className="error-copy">{refresh.error.message}</p>}
-          {Boolean(item.external_id || item.overview || item.genres || item.poster_path || item.backdrop_path) && <Button variant="secondary" isPending={clear.isPending} onPress={() => { if (window.confirm('Clear matched metadata and artwork? Your video, favorites and watch progress will be kept. Automatic matching for this video will be disabled.')) clear.mutate(); }}>Clear metadata</Button>}
-          {Boolean(item.metadata_blocked) && <p>Using the filename. Automatic matching is disabled for this video. Fetch metadata to match it again.</p>}
-          {clear.error && <p className="error-copy">{clear.error.message}</p>}
           <dl className="tech-meta"><div><dt>File</dt><dd>{item.filename}</dd></div><div><dt>Container</dt><dd>{item.container?.toUpperCase() || 'Unknown'}</dd></div><div><dt>Audio</dt><dd>{item.audio_codec?.toUpperCase() || 'Unknown'}</dd></div></dl>
         </div>
       </div>

@@ -41,6 +41,7 @@ export const api = {
   startScan: () => request<{started:boolean;status:ScanStatus}>('/api/scan', { method: 'POST' }),
   scanStatus: () => request<ScanStatus>('/api/scan/status'),
   clearMetadata: (id:number) => request<MediaItem>(`/api/media/${id}/metadata`, { method:'DELETE' }),
+  clearAllMetadata: () => request<{cleared:number}>('/api/metadata', { method:'DELETE' }),
   refreshMetadata: (id:number) => request<MediaItem>(`/api/media/${id}/metadata/refresh`, { method:'POST' }),
   playbackInfo: (id:number) => request<PlaybackInfo>(`/api/media/${id}/playback`),
   startTranscode: (id:number,audioStream?:number) => request<{status:string;error?:string;playlist:string;bufferedUntil?:number;complete?:boolean}>(`/api/media/${id}/transcode/start`, {method:'POST',body:JSON.stringify(audioStream===undefined?{}:{audioStream})}),

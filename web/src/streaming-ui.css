@@ -168,6 +168,7 @@
   .app-shell .settings-section .settings-card-head h2 { font-size:24px; }
   .app-shell .settings-section .setting-row { gap:20px; }
   .app-shell .settings-section .setting-row:has(.settings-picker) { flex-direction:column; align-items:stretch; }
+  .app-shell .settings-section .settings-action-row { flex-direction:column; align-items:stretch; }
   .app-shell .settings-picker { min-width:0; width:100%; }
   .app-shell .media-row { grid-auto-columns:clamp(180px,60vw,300px); gap:12px; }
   .app-shell .media-row.poster-row { grid-auto-columns:clamp(130px,35vw,180px); }

@@ -43,6 +43,7 @@ try{
      body={videoCodec:'h264',width:item.width,height:item.height,qualityOptions:[{height:item.height,label:item.height+'p',bitrate:3000000},...(id===46?[{height:360,label:'360p',bitrate:700000}]:[])],audioTracks:[{index:1,typeIndex:0,codec:'aac',language:'eng',default:true,supported:true}],subtitleTracks:[],defaultAudioStream:1,requiresVideoTranscode:false,requiresAudioTranscode:false,requiresTranscode:false};
     }else if(u.pathname.endsWith('/quality/start')){qualityStarts++;body={status:'error',error:'Audit forced unavailable rendition'};}
     else if(u.pathname.endsWith('/like')){item.liked=req.postDataJSON().liked?1:0;body={ok:true,liked:Boolean(item.liked)};}
+    else if(u.pathname==='/api/metadata'&&req.method()==='DELETE'){for(const media of fixtures)Object.assign(media,{title:media.filename.replace('.mp4',''),overview:null,genres:null,poster_path:null,backdrop_path:null,external_id:null,metadata_blocked:1,metadata_revision:(media.metadata_revision||0)+1});body={cleared:fixtures.length};}
     else if(u.pathname.endsWith('/metadata')&&req.method()==='DELETE'){Object.assign(item,{title:item.filename.replace('.mp4',''),overview:null,genres:null,poster_path:null,backdrop_path:null,external_id:null,metadata_blocked:1,metadata_revision:1});body=item;}
     else if(u.pathname.endsWith('/progress'))body={ok:true};
     else if(item)body=item;
@@ -158,12 +159,27 @@ try{
   if(mode==='npm')Object.assign(fixtures[0],{title:'Wrong match',external_id:'wrong',overview:'Wrong description'});
   else resetId=await page.evaluate(async()=>{const item=(await window.__api.media())[0];const stored=await window.__get(item.id);stored.title='Wrong match';stored.external_id='wrong';stored.overview='Wrong description';await window.__save(stored);return stored.id;});
   await page.evaluate(async({prefix,id})=>{const {router}=await import('/src/router.tsx');await router.navigate({to:prefix+'/title/$mediaId',params:{mediaId:String(id)}});},{prefix,id:resetId});
-  await page.getByRole('button',{name:'Clear metadata',exact:true}).waitFor();
+  await page.locator('.detail-copy h1').waitFor();
+  check(await page.getByRole('button',{name:'Clear metadata',exact:true}).count()===0,'no per-video metadata clear button '+mode);
+  await page.evaluate(async prefix=>{const {router}=await import('/src/router.tsx');await router.navigate({to:prefix+'/settings'});},prefix);
+  await page.locator('#settings-nav-'+(mode==='npm'?'network':'metadata')).click();
+  const clearAll=page.getByRole('button',{name:'Clear all metadata',exact:true});
+  await clearAll.waitFor();
+  page.once('dialog',dialog=>dialog.dismiss());
+  await clearAll.click();
+  check(await page.getByText(/Metadata cleared for/).count()===0,'bulk clear cancellation keeps data '+mode);
   page.once('dialog',dialog=>dialog.accept());
-  await page.getByRole('button',{name:'Clear metadata',exact:true}).click();
+  await clearAll.click();
+  await page.getByText(/Metadata cleared for/).waitFor();
+  if(mode==='web') {
+    const items=await page.evaluate(()=>window.__api.media());
+    check(items.every(item=>item.external_id===null&&item.overview===null&&item.metadata_blocked===1),'bulk clear resets every browser video '+mode);
+    const preserved=await page.evaluate(()=>window.__get(window.__landscapeId));
+    check(preserved.liked===1&&preserved.progress_position===5,'bulk clear preserves browser likes and progress '+mode);
+  } else check(fixtures.every(item=>item.external_id===null&&item.overview===null&&item.metadata_blocked===1),'bulk clear resets every server video '+mode);
+  await page.evaluate(async({prefix,id})=>{const {router}=await import('/src/router.tsx');await router.navigate({to:prefix+'/title/$mediaId',params:{mediaId:String(id)}});},{prefix,id:resetId});
   await page.waitForFunction(()=>document.querySelector('.detail-copy h1')?.textContent==='Clip 0');
-  check(await page.getByRole('button',{name:'Clear metadata',exact:true}).count()===0,'metadata clear UI restores filename '+mode);
-  check(await page.getByText(/Using the filename/).isVisible(),'metadata reset explained '+mode);
+  check(await page.getByRole('button',{name:'Clear metadata',exact:true}).count()===0,'bulk clear refreshes detail title '+mode);
   check(errors.length===0,'no browser errors '+mode+': '+errors.join(','));
   await page.evaluate(async ({prefix})=>{
     const {router}=await import('/src/router.tsx');
