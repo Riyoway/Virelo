@@ -19,6 +19,7 @@ try{
   const context=await browser.newContext({serviceWorkers:'block',reducedMotion:'reduce'});
   const page=await context.newPage();page.setDefaultTimeout(15000);
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  page.on('dialog',dialog=>{errors.push('Unexpected native dialog: '+dialog.type());void dialog.dismiss();});
   const base=(mode==='npm'?process.env.VIRELO_TEST_NPM_URL:process.env.VIRELO_TEST_WEB_URL)||('http://127.0.0.1:'+(mode==='npm'?5198:5199)),prefix=mode==='npm'?'':'/app';
   const fixtures=Array.from({length:46},(_,i)=>({id:i+1,library_id:1,path:'Clip '+i+'.mp4',source_path:'Clip '+i+'.mp4',filename:'Clip '+i+'.mp4',title:'Clip '+i,sort_title:'clip '+i,kind:'movie',series_title:null,season:null,episode:null,year:2020,duration:15,width:i===45?1280:360,height:i===45?720:640,video_codec:'h264',audio_codec:'aac',container:'mp4',folder:'',size:1,mtime:1,added_at:1,updated_at:1,thumbnail_path:null,poster_path:null,backdrop_path:null,overview:null,genres:null,external_id:null,liked:0}));
   let shortsSeeds=[],qualityStarts=0,gate=null;
@@ -165,11 +166,16 @@ try{
   await page.locator('#settings-nav-'+(mode==='npm'?'network':'metadata')).click();
   const clearAll=page.getByRole('button',{name:'Clear all metadata',exact:true});
   await clearAll.waitFor();
-  page.once('dialog',dialog=>dialog.dismiss());
   await clearAll.click();
+  const confirmation=page.getByRole('alertdialog',{name:'Clear all metadata?'});
+  await confirmation.waitFor();
+  check(await confirmation.getByRole('button',{name:'Cancel',exact:true}).evaluate(button=>button===document.activeElement),'confirmation initially focuses Cancel '+mode);
+  await confirmation.getByRole('button',{name:'Cancel',exact:true}).click();
+  await confirmation.waitFor({state:'hidden'});
   check(await page.getByText(/Metadata cleared for/).count()===0,'bulk clear cancellation keeps data '+mode);
-  page.once('dialog',dialog=>dialog.accept());
   await clearAll.click();
+  await confirmation.getByRole('button',{name:'Clear metadata',exact:true}).click();
+  await confirmation.waitFor({state:'hidden'});
   await page.getByText(/Metadata cleared for/).waitFor();
   if(mode==='web') {
     const items=await page.evaluate(()=>window.__api.media());

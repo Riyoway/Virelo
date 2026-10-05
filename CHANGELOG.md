@@ -5,6 +5,7 @@
 - Remove persistent Shorts play/pause controls, move sound above Like, shuffle each Shorts visit and preserve clip alignment on rotation.
 - Respect pause/play intent during quality and audio preparation, cancel stale source restores, and keep preparation overlays off paused playback.
 - Add a settings-level bulk metadata reset across all libraries, preserving files, thumbnails, favorites and watch progress without automatic rematching.
+- Replace browser confirmation dialogs with Virelo-styled accessible modals, including cancellation, pending protection and inline error/retry.
 - Contain field focus, flatten native seek tracks, and fix context-menu event propagation and keyboard focus.
 - Keep queue selection stable on refresh and add repeatable browser/FFmpeg regression audits.
 

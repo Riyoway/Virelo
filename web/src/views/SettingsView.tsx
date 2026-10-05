@@ -6,6 +6,7 @@ import { api } from '../api';
 import { ScanProgress } from '../components/ScanProgress';
 import { Select } from '../components/Select';
 import { SettingsNavigation } from '../components/SettingsNavigation';
+import { ConfirmationDialog } from '../components/ConfirmationDialog';
 import type { QueueBehavior, Settings } from '../types';
 
 const settingsSections = [
@@ -72,9 +73,8 @@ export function SettingsView(){
           <div className="settings-card-head"><div><h2 id="settings-title-network" tabIndex={-1}>Metadata</h2><p>Choose how Virelo matches your videos and finds artwork.</p></div></div>
           <SettingSwitch checked={form.externalMetadataEnabled} onChange={(v)=>setForm({...form,externalMetadataEnabled:v})} title="Online metadata" description="Match titles, summaries, genres and release years during scans. No account or API key required."/>
           <SettingSwitch checked={form.externalImagesEnabled} disabled={!form.externalMetadataEnabled} onChange={(v)=>setForm({...form,externalImagesEnabled:v})} title="Posters and artwork" description="Replace generated thumbnails with posters, backdrops and episode images."/>
-          <div className="setting-row settings-action-row"><div className="setting-copy"><div><strong>Clear all metadata</strong><p>Reset titles and remove matched descriptions and artwork from every added library. Videos, generated thumbnails, favorites and watch progress stay intact. Existing videos will not be automatically matched again.</p></div></div><Button variant="secondary" isPending={clearMetadata.isPending} onPress={()=>{if(window.confirm('Clear metadata for ALL videos in every added library, including hidden libraries? Titles will return to filenames. Videos, generated thumbnails, favorites and watch progress will be kept. Existing videos will not be automatically matched again.'))clearMetadata.mutate();}}>Clear all metadata</Button></div>
+          <div className="setting-row settings-action-row"><div className="setting-copy"><div><strong>Clear all metadata</strong><p>Reset titles and remove matched descriptions and artwork from every added library. Videos, generated thumbnails, favorites and watch progress stay intact. Existing videos will not be automatically matched again.</p></div></div><ConfirmationDialog triggerLabel="Clear all metadata" title="Clear all metadata?" confirmLabel="Clear metadata" onConfirm={()=>clearMetadata.mutateAsync()}><p>Clear matched titles, descriptions and artwork from <strong>every added library, including hidden libraries</strong>. Titles will return to filenames.</p><p>Your videos, generated thumbnails, favorites and watch progress will stay intact.</p><p>Existing videos will not be automatically matched again.</p></ConfirmationDialog></div>
           <div role="status">{clearMetadata.isSuccess&&<p>Metadata cleared for {clearMetadata.data.cleared} videos.</p>}</div>
-          {clearMetadata.error&&<p className="error-copy" role="alert">{clearMetadata.error.message}</p>}
         </section>}
 
         {activeSection==='playback'&&<section id="settings-panel-playback" className="settings-card settings-section" aria-labelledby="settings-title-playback">
