@@ -3,6 +3,7 @@ import { ArrowsOut, FastForward, Pause, PictureInPicture, Play, RepeatOnce, Rewi
 import { api } from '../api';
 import { useHlsFallback } from '../hooks/useHlsFallback';
 import { useAdaptiveQuality } from '../hooks/useAdaptiveQuality';
+import { playVideo } from '../utils/media-playback';
 import { toggleFullscreen } from '../utils/fullscreen';
 import { DraggableCaption, HiddenSubtitleTrack } from './DraggableCaption';
 import { PlaybackSettingsMenu } from './PlaybackSettingsMenu';
@@ -27,6 +28,9 @@ type HlsInstance=InstanceType<(typeof import('hls.js/light'))['default']>;
 export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=true,canGoPrev=true,autoPlay}:PlayerProps) {
   const localPlayback=isLocalPlaybackHost();
   const videoRef = useRef<HTMLVideoElement>(null);
+  const sourceTransition = useRef(false);
+  const wantsPlayback = useRef(Boolean(autoPlay));
+  const [playRequested, setPlayRequested] = useState(Boolean(autoPlay));
   const audioRef = useRef<HTMLAudioElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const lastProgress = useRef(0);
@@ -43,8 +47,8 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
   const videoFallbackRequested = useRef(false);
   const qualityRequested = useRef(true);
   const autoBufferTimer = useRef<number|null>(null);
-  const { fallback, error, startFallback, release:releaseFallback } = useHlsFallback(item, videoRef);
-  const {state:qualityState,error:qualityError,start:startQuality,selectedQuality,activeQuality,qualityOptions,setQuality}=useAdaptiveQuality(item,videoRef,releaseFallback);
+  const { fallback, error, startFallback, release:releaseFallback } = useHlsFallback(item, videoRef, wantsPlayback, sourceTransition);
+  const {state:qualityState,error:qualityError,start:startQuality,selectedQuality,activeQuality,qualityOptions,setQuality}=useAdaptiveQuality(item,videoRef,releaseFallback,wantsPlayback,sourceTransition);
   const [playbackInfo,setPlaybackInfo] = useState<PlaybackInfo|null>(null);
   const [selectedAudio,setSelectedAudio] = useState<number|null>(null);
   const [selectedSubtitle,setSelectedSubtitle] = useState<number|null>(null);
@@ -65,6 +69,10 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
   const [controlsVisible,setControlsVisible] = useState(true);
 
   useEffect(()=>{
+    sourceTransition.current=false;
+    wantsPlayback.current=Boolean(autoPlay);
+    setPlayRequested(Boolean(autoPlay));
+    playbackItemId.current=item.id;
     audioToken.current++;
     audioSourceToken.current++;
     videoFallbackRequested.current=false;
@@ -95,7 +103,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
 
   useEffect(()=>{
     let alive=true;
-    if(autoPlay)void videoRef.current?.play().catch(()=>{});
+    if(wantsPlayback.current)requestVideoPlayback();
     api.playbackInfo(item.id).then(async(info)=>{
       if(!alive)return;
       setPlaybackInfo(info);
@@ -109,15 +117,16 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
           videoFallbackRequested.current=true;
           const video=videoRef.current;
           const position=video?.currentTime||item.progress_position||0;
+          sourceTransition.current=true;
           video?.pause();
-          await startFallback(info.defaultAudioStream??undefined,position,Boolean(autoPlay));
+          await startFallback(info.defaultAudioStream??undefined,position,wantsPlayback.current);
         }else{
           setPlaybackReady(true);
-          if(autoPlay)void videoRef.current?.play().catch(()=>{});
+          if(wantsPlayback.current)requestVideoPlayback();
         }
         return;
       }
-      const adaptiveReady=await startQuality(info.defaultAudioStream??undefined,item.progress_position||0,Boolean(autoPlay));
+      const adaptiveReady=await startQuality(info.defaultAudioStream??undefined,item.progress_position||0,wantsPlayback.current);
       if(!alive)return;
       if(adaptiveReady){
         setPlaybackReady(true);
@@ -128,25 +137,26 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
         await prepareAudio(info.defaultAudioStream,info,true,true);
       }else{
         setPlaybackReady(true);
-        if(autoPlay)void videoRef.current?.play().catch(()=>{});
+        if(wantsPlayback.current)requestVideoPlayback();
       }
     }).catch(()=>{
       if(!alive)return;
       qualityRequested.current=false;
       setPlaybackReady(true);
-      if(autoPlay)void videoRef.current?.play().catch(()=>{});
+      if(wantsPlayback.current)requestVideoPlayback();
     });
     return()=>{alive=false;audioToken.current++;};
   },[autoPlay,item.id,localPlayback,setQuality,startQuality,startFallback]);
 
   useEffect(()=>{
     if(qualityState!=='active')return;
+    sourceTransition.current=false;
     audioRef.current?.pause();
     setExternalAudioUrl('');
     setPlaybackReady(true);
   },[qualityState]);
 
-  useEffect(()=>{if(fallback==='active')setPlaybackReady(true);},[fallback]);
+  useEffect(()=>{if(fallback==='active'){sourceTransition.current=false;setPlaybackReady(true);}},[fallback]);
 
   useEffect(()=>{setActiveCaption('');},[item.id,selectedSubtitle]);
 
@@ -175,14 +185,15 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
       if(pendingPosition!==null)audioResumeAt.current=null;
       if(!ready){
         ready=true;
+        sourceTransition.current=false;
         setPlaybackReady(true);
       }
       if(video&&!video.paused){
         syncExternalAudio(true);
-      }else if(resumeAfterAudio.current){
+      }else if(resumeAfterAudio.current&&wantsPlayback.current){
         resumeAfterAudio.current=false;
         window.requestAnimationFrame(()=>{
-          if(disposed||sourceToken!==audioSourceToken.current)return;
+          if(disposed||sourceToken!==audioSourceToken.current||!wantsPlayback.current)return;
           const playPromise=videoRef.current?.play();
           if(playPromise)void playPromise.then(()=>requestExternalAudioPlayback()).catch(()=>{resumeAfterAudio.current=true;});
         });
@@ -250,10 +261,10 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
 
   useEffect(()=>{
     const video=videoRef.current;
-    if(!buffering||!video||video.seeking||localPlayback||selectedQuality!==null||!playbackReady||qualityState!=='idle')return;
+    if(!buffering||!video||!wantsPlayback.current||video.paused||video.seeking||localPlayback||selectedQuality!==null||!playbackReady||qualityState!=='idle')return;
     autoBufferTimer.current=window.setTimeout(()=>{
       autoBufferTimer.current=null;
-      if(video.paused||video.seeking||video.readyState>=HTMLMediaElement.HAVE_FUTURE_DATA)return;
+      if(!wantsPlayback.current||video.paused||video.seeking||video.readyState>=HTMLMediaElement.HAVE_FUTURE_DATA)return;
       qualityRequested.current=true;
       void startQuality(selectedAudio??undefined,video.currentTime,true,true).then((ready)=>{
         if(!ready)qualityRequested.current=false;
@@ -263,11 +274,11 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
       if(autoBufferTimer.current!==null)window.clearTimeout(autoBufferTimer.current);
       autoBufferTimer.current=null;
     };
-  },[buffering,localPlayback,playbackReady,qualityState,selectedAudio,selectedQuality,startQuality]);
+  },[buffering,playRequested,localPlayback,playbackReady,qualityState,selectedAudio,selectedQuality,startQuality]);
 
   function handleWaiting(){
     audioRef.current?.pause();
-    setBuffering(true);
+    if(wantsPlayback.current&&!videoRef.current?.paused)setBuffering(true);
   }
   function handlePlaying(){
     setBuffering(false);
@@ -324,14 +335,24 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
       },150);
     });
   }
+  function requestVideoPlayback(){
+    const video=videoRef.current;
+    const requestItemId=item.id;
+    if(!video)return;
+    void playVideo(video,()=>wantsPlayback.current&&playbackItemId.current===requestItemId,()=>{
+      setMuted(true);
+      if(audioRef.current)audioRef.current.muted=true;
+    }).then(()=>{if(playbackItemId.current===requestItemId)requestExternalAudioPlayback();});
+  }
   function toggle(){
-    const v=videoRef.current;
-    if(!v||audioPreparing)return;
-    if(v.paused){
-      audioRetryCount.current=0;
-      const result=v.play();
-      if(result)void result.then(()=>requestExternalAudioPlayback()).catch(()=>{});
-    }else v.pause();
+    const video=videoRef.current;
+    if(!video)return;
+    const preparingPlayback=audioPreparing||qualityState==='starting'||fallback==='starting';
+    const next=preparingPlayback?!wantsPlayback.current:video.paused;
+    wantsPlayback.current=next;
+    setPlayRequested(next);
+    if(next){audioRetryCount.current=0;requestVideoPlayback();}
+    else {video.pause();audioRef.current?.pause();setBuffering(false);}
   }
   function handleVideoClick(){if(usesTouchControls()&&!controlsVisible){revealControls();return;}toggle();revealControls();}
   function seek(value:number){const v=videoRef.current;if(!v)return;v.currentTime=value;if(audioRef.current&&externalAudioUrl){try{audioRef.current.currentTime=value;}catch{audioResumeAt.current=value;}}setCurrent(value);}
@@ -346,13 +367,13 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
     if(!initial&&selectedAudio===stream&&!audioPreparing)return;
     const video=videoRef.current;
     const token=++audioToken.current;
-    const wasPlaying=Boolean(video&&!video.paused);
-    const shouldResume=initial?Boolean(autoPlay):wasPlaying;
+    const shouldResume=wantsPlayback.current;
     const position=video&&Number.isFinite(video.currentTime)?video.currentTime:current;
     const track=info.audioTracks.find((candidate)=>candidate.index===stream);
     const canUseOriginal=stream===info.defaultAudioStream&&Boolean(track&&DIRECT_AUDIO_CODECS.has(track.codec));
     setSelectedAudio(stream);
     setAudioError('');
+    sourceTransition.current=true;
     video?.pause();
     audioRef.current?.pause();
 
@@ -363,7 +384,8 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
       setExternalAudioUrl('');
       setPlaybackReady(false);
       const ready=await startQuality(stream,position,shouldResume);
-      if(ready){setPlaybackReady(true);return;}
+      if(token!==audioToken.current)return;
+      if(ready){sourceTransition.current=false;setPlaybackReady(true);return;}
       qualityRequested.current=false;
     }
 
@@ -379,9 +401,10 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
       audioResumeAt.current=null;
       setExternalAudioUrl('');
       setAudioPreparing(false);
+      sourceTransition.current=false;
       setPlaybackReady(true);
       if(shouldResume)window.setTimeout(()=>{
-        if(token!==audioToken.current)return;
+        if(token!==audioToken.current||!wantsPlayback.current)return;
         const nextVideo=videoRef.current;
         if(nextVideo){nextVideo.muted=muted;nextVideo.volume=volume;void nextVideo.play().catch(()=>{});}
       },0);
@@ -409,23 +432,26 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
     setQuality(height);
     if(qualityState==='active'||qualityState==='starting'||height===null||height===playbackInfo?.qualityOptions[0]?.height)return;
     const video=videoRef.current;
-    const shouldResume=Boolean(video&&!video.paused);
+    const shouldResume=wantsPlayback.current;
     qualityRequested.current=true;
+    sourceTransition.current=true;
     video?.pause();
     setPlaybackReady(false);
     const ready=await startQuality(selectedAudio??undefined,video?.currentTime||current,shouldResume);
-    if(ready){setPlaybackReady(true);return;}
+    if(playbackItemId.current!==item.id)return;
+    if(ready){sourceTransition.current=false;setPlaybackReady(true);return;}
     qualityRequested.current=false;
     setQuality(playbackInfo?.qualityOptions[0]?.height??null);
+    sourceTransition.current=false;
     setPlaybackReady(true);
-    if(shouldResume)void videoRef.current?.play().catch(()=>{});
+    if(wantsPlayback.current)requestVideoPlayback();
   }
 
   function prepareCompatibleVideo(){
     if(qualityRequested.current||qualityState==='starting'||qualityState==='active'||fallback!=='idle'||videoFallbackRequested.current)return;
     videoFallbackRequested.current=true;
     const video=videoRef.current;
-    const shouldPlay=Boolean(autoPlay||playing||resumeAfterAudio.current);
+    const shouldPlay=wantsPlayback.current;
     audioToken.current++;
     audioRef.current?.pause();
     setExternalAudioUrl('');
@@ -434,6 +460,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
     void startFallback(selectedAudio??undefined,video?.currentTime||current,shouldPlay);
   }
 
+  const pauseAction=playing||(playRequested&&(audioPreparing||qualityState==='starting'||fallback==='starting'));
   return <div className={`player${queue?.length?' has-queue':''}${controlsVisible?' controls-visible':''}`} ref={containerRef} onDoubleClick={()=>void fullscreen()} onPointerMove={(event)=>{if(event.pointerType==='mouse'){revealControls();scheduleControlsHide();}}} onPointerDown={revealControls} onPointerUp={scheduleControlsHide} onPointerCancel={scheduleControlsHide} onPointerLeave={scheduleControlsHide} onFocusCapture={revealControls} onBlurCapture={scheduleControlsHide} onKeyDown={()=>{revealControls();scheduleControlsHide();}}>
     <video
       ref={videoRef}
@@ -444,10 +471,13 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
       autoPlay={false}
       crossOrigin="anonymous"
       onClick={handleVideoClick}
+      onVolumeChange={(event)=>{if(!externalAudioUrl){setMuted(event.currentTarget.muted);setVolume(event.currentTarget.volume);}}}
       onPlay={()=>{setPlaying(true);syncExternalAudio(true);requestExternalAudioPlayback();revealControls();scheduleControlsHide();}}
       onPlaying={handlePlaying}
       onWaiting={handleWaiting}
-      onPause={(e)=>{audioRef.current?.pause();if(audioRetryTimer.current!==null)window.clearTimeout(audioRetryTimer.current);audioRetryTimer.current=null;audioRetryCount.current=0;setPlaying(false);revealControls();const v=e.currentTarget;void api.progress(playbackItemId.current,v.currentTime,fullDuration(v.duration,item.duration,duration));}}
+      onSeeking={()=>audioRef.current?.pause()}
+      onSeeked={()=>syncExternalAudio(!videoRef.current?.paused)}
+      onPause={(e)=>{if(!sourceTransition.current){wantsPlayback.current=false;setPlayRequested(false);}audioRef.current?.pause();if(audioRetryTimer.current!==null)window.clearTimeout(audioRetryTimer.current);audioRetryTimer.current=null;audioRetryCount.current=0;setPlaying(false);setBuffering(false);if(autoBufferTimer.current!==null)window.clearTimeout(autoBufferTimer.current);autoBufferTimer.current=null;revealControls();const v=e.currentTarget;void api.progress(playbackItemId.current,v.currentTime,fullDuration(v.duration,item.duration,duration));}}
       onLoadedMetadata={(e)=>{
         const v=e.currentTarget;playbackItemId.current=item.id;setDuration(fullDuration(v.duration,item.duration));
         if(initialResumeItem.current!==item.id){
@@ -459,6 +489,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
       onDurationChange={(e)=>setDuration(fullDuration(e.currentTarget.duration,item.duration,duration))}
       onCanPlay={(e)=>{
         if(!e.currentTarget.paused)syncExternalAudio(true);
+        else if(wantsPlayback.current&&playbackReady&&fallback==='idle'&&qualityState==='idle'&&!audioPreparing)requestVideoPlayback();
       }}
       onTimeUpdate={(e)=>{
         const v=e.currentTarget;setCurrent(v.currentTime);syncExternalAudio(!v.paused);
@@ -478,22 +509,22 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
     </video>
     <audio ref={audioRef} preload="auto"/>
     <DraggableCaption key={`${item.id}:${selectedSubtitle}`} text={activeCaption} controlsVisible={controlsVisible} containerRef={containerRef} onDraggingChange={(dragging)=>{if(dragging)revealControls();else window.setTimeout(scheduleControlsHide,0);}}/>
-    {qualityState==='starting'&&(!playing||buffering)&&<div className="player-status"><SpinnerGap className="spin"/><strong>{selectedQuality===null?'Buffering…':`Switching to ${qualityLabel(selectedQuality)}…`}</strong></div>}
-    {audioPreparing&&<div className="player-status"><SpinnerGap className="spin"/><strong>Preparing audio…</strong><span>Only the audio track is being converted. The cached result will be reused.</span></div>}
-    {fallback==='starting'&&(!playing||buffering) && <div className="player-status"><SpinnerGap className="spin"/><strong>{playbackInfo?.requiresVideoTranscode?'Preparing video…':'Preparing audio…'}</strong></div>}
+    {qualityState==='starting'&&playRequested&&(!playing||buffering)&&<div className="player-status"><SpinnerGap className="spin"/><strong>{selectedQuality===null?'Buffering…':`Switching to ${qualityLabel(selectedQuality)}…`}</strong></div>}
+    {audioPreparing&&playRequested&&<div className="player-status"><SpinnerGap className="spin"/><strong>Preparing audio…</strong><span>Only the audio track is being converted. The cached result will be reused.</span></div>}
+    {fallback==='starting'&&playRequested&&(!playing||buffering) && <div className="player-status"><SpinnerGap className="spin"/><strong>{playbackInfo?.requiresVideoTranscode?'Preparing video…':'Preparing audio…'}</strong></div>}
     {(fallback==='error'||audioError||(qualityState==='error'&&qualityRequested.current&&!playing)) && <div className="player-status error"><strong>Playback unavailable</strong><span>{audioError||error||qualityError}</span></div>}
     <div className="player-gradient"/>
     <div className="player-controls">
-      <input className="player-seek" aria-label="Seek" type="range" min="0" max={Math.max(duration,1)} step="0.1" value={Math.min(current,Math.max(duration,1))} onChange={(e)=>seek(Number(e.target.value))}/>
+      <input className="player-seek" style={{'--range-fill':`${Math.min(100, duration > 0 ? current/duration*100 : 0)}%`} as React.CSSProperties} aria-label="Seek" type="range" min="0" max={Math.max(duration,1)} step="0.1" value={Math.min(current,Math.max(duration,1))} onChange={(e)=>seek(Number(e.target.value))}/>
       <div className="player-toolbar">
         {onPrev && <button onClick={onPrev} aria-label="Previous video" disabled={!canGoPrev}><SkipBack weight="fill"/></button>}
         <button className="skip-button" onClick={()=>seekBy(-10)} aria-label="Rewind 10 seconds"><Rewind weight="bold"/></button>
-        <button onClick={toggle} aria-label={playing?'Pause':'Play'} disabled={audioPreparing}>{playing?<Pause weight="fill"/>:<Play weight="fill"/>}</button>
+        <button onClick={toggle} aria-label={pauseAction?'Pause':'Play'} aria-busy={audioPreparing}>{pauseAction?<Pause weight="fill"/>:<Play weight="fill"/>}</button>
         <button className="skip-button" onClick={()=>seekBy(10)} aria-label="Fast-forward 10 seconds"><FastForward weight="bold"/></button>
         {onNext && <button onClick={onNext} aria-label="Next video" disabled={!canGoNext}><SkipForward weight="fill"/></button>}
         <button className={looping?'active':''} onClick={()=>setLooping((value)=>!value)} aria-label={looping?'Turn off loop':'Loop current video'} aria-pressed={looping}><RepeatOnce weight={looping?'fill':'regular'}/></button>
         <button onClick={toggleMute} aria-label={muted?'Unmute':'Mute'}>{muted?<SpeakerSlash weight="fill"/>:<SpeakerHigh weight="fill"/>}</button>
-        <input className="volume-slider" aria-label="Volume" type="range" min="0" max="1" step="0.05" value={muted?0:volume} onChange={(e)=>setVol(Number(e.target.value))}/>
+        <input className="volume-slider" style={{'--range-fill':`${muted ? 0 : volume*100}%`} as React.CSSProperties} aria-label="Volume" type="range" min="0" max="1" step="0.05" value={muted?0:volume} onChange={(e)=>setVol(Number(e.target.value))}/>
         <span className="player-time">{time(current)} / {time(duration)}</span>
         {queue && queueIndex!==undefined && <span className="player-queue">{queueIndex+1} / {queue.length}</span>}
         {playbackInfo&&<PlaybackSettingsMenu

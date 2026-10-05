@@ -1,3 +1,4 @@
+import { playVideo } from '../utils/media-playback';
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { api } from '../api';
 import type { MediaItem } from '../types';
@@ -5,7 +6,7 @@ import type { MediaItem } from '../types';
 type FallbackState = 'idle' | 'starting' | 'active' | 'error';
 type HlsInstance = InstanceType<(typeof import('hls.js/light'))['default']>;
 
-export function useHlsFallback(item: MediaItem, videoRef: RefObject<HTMLVideoElement | null>) {
+export function useHlsFallback(item: MediaItem, videoRef: RefObject<HTMLVideoElement | null>, playIntent?: RefObject<boolean>, sourceTransition?: RefObject<boolean>) {
   const hlsRef = useRef<HlsInstance|null>(null);
   const fallbackTimer = useRef<number|null>(null);
   const restoreToken = useRef(0);
@@ -44,6 +45,7 @@ export function useHlsFallback(item: MediaItem, videoRef: RefObject<HTMLVideoEle
     const video = videoRef.current;
     if (!video) return;
     stopCurrent();
+    if(sourceTransition)sourceTransition.current=true;
     const attachToken=restoreToken.current;
     let restored=false;
     let manifestReady=false;
@@ -56,8 +58,9 @@ export function useHlsFallback(item: MediaItem, videoRef: RefObject<HTMLVideoEle
       restored=true;
       cleanupRestore();
       setActiveAudioStream(audioStream);
+      if(sourceTransition)sourceTransition.current=false;
       setState('active');
-      if (shouldPlay) void video.play().catch(() => {});
+      void playVideo(video,()=>attachToken===restoreToken.current&&(playIntent?.current ?? shouldPlay));
     };
     cleanupRestore=()=>{
       if(fallbackTimer.current!==null)window.clearTimeout(fallbackTimer.current);
@@ -65,12 +68,16 @@ export function useHlsFallback(item: MediaItem, videoRef: RefObject<HTMLVideoEle
       video.removeEventListener('loadedmetadata',restorePlayback);
       video.removeEventListener('durationchange',restorePlayback);
       video.removeEventListener('canplay',restorePlayback);
+      video.removeEventListener('seeked',restorePlayback);
+      video.removeEventListener('loadeddata',restorePlayback);
       if(restoreCleanupRef.current===cleanupRestore)restoreCleanupRef.current=null;
     };
     restoreCleanupRef.current=cleanupRestore;
     video.addEventListener('loadedmetadata',restorePlayback);
     video.addEventListener('durationchange',restorePlayback);
     video.addEventListener('canplay',restorePlayback);
+    video.addEventListener('seeked',restorePlayback);
+    video.addEventListener('loadeddata',restorePlayback);
     fallbackTimer.current=window.setTimeout(()=>{cleanupRestore();setState('error');setError('Compatible playback could not start.');},20000);
     try {
       const { default: Hls } = await import('hls.js/light');
@@ -95,11 +102,12 @@ export function useHlsFallback(item: MediaItem, videoRef: RefObject<HTMLVideoEle
         setState('error');
       });
     } catch (reason) {
+      if(attachToken!==restoreToken.current)return;
       cleanupRestore();
       setError(reason instanceof Error ? reason.message : 'This browser cannot play HLS.');
       setState('error');
     }
-  }, [setState, stopCurrent, videoRef]);
+  }, [setState, stopCurrent, videoRef, playIntent, sourceTransition]);
 
   const startFallback = useCallback(async (audioStream?: number, resumeAt?: number, shouldPlay?: boolean) => {
     const requestedStream = audioStream ?? null;

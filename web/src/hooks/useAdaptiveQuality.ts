@@ -1,3 +1,4 @@
+import { playVideo } from '../utils/media-playback';
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { api, type QualityTranscodeState } from '../api';
 import type { MediaItem, PlaybackQuality } from '../types';
@@ -6,7 +7,7 @@ type AdaptiveState='idle'|'starting'|'active'|'error';
 type HlsInstance=InstanceType<(typeof import('hls.js/light'))['default']>;
 let sessionBandwidth=1_000_000;
 
-export function useAdaptiveQuality(item:MediaItem,videoRef:RefObject<HTMLVideoElement|null>,releasePreviousSource?:()=>void){
+export function useAdaptiveQuality(item:MediaItem,videoRef:RefObject<HTMLVideoElement|null>,releasePreviousSource?:()=>void,playIntent?:RefObject<boolean>,sourceTransition?:RefObject<boolean>){
   const hlsRef=useRef<HlsInstance|null>(null);
   const requestToken=useRef(0);
   const restoreToken=useRef(0);
@@ -51,6 +52,7 @@ export function useAdaptiveQuality(item:MediaItem,videoRef:RefObject<HTMLVideoEl
     const video=videoRef.current;
     if(!video)return false;
     const previousSource=video.currentSrc||video.src;
+    if(sourceTransition)sourceTransition.current=true;
     variantsRef.current=result.variants;
     setQualityOptions(result.variants);
     destroy();
@@ -70,8 +72,9 @@ export function useAdaptiveQuality(item:MediaItem,videoRef:RefObject<HTMLVideoEl
       if(video.seeking||video.readyState<HTMLMediaElement.HAVE_FUTURE_DATA)return;
       restored=true;
       cleanupRestore();
+      if(sourceTransition)sourceTransition.current=false;
       setState('active');
-      if(shouldPlay)void video.play().catch(()=>{});
+      void playVideo(video,()=>attachToken===restoreToken.current&&(playIntent?.current ?? shouldPlay));
       finishAttach(true);
     };
     cleanupRestore=()=>{
@@ -79,6 +82,8 @@ export function useAdaptiveQuality(item:MediaItem,videoRef:RefObject<HTMLVideoEl
       video.removeEventListener('loadedmetadata',restore);
       video.removeEventListener('durationchange',restore);
       video.removeEventListener('canplay',restore);
+      video.removeEventListener('seeked',restore);
+      video.removeEventListener('loadeddata',restore);
       if(restoreCleanupRef.current===cancelRestore)restoreCleanupRef.current=null;
     };
     const cancelRestore=()=>{cleanupRestore();finishAttach(false);};
@@ -86,6 +91,8 @@ export function useAdaptiveQuality(item:MediaItem,videoRef:RefObject<HTMLVideoEl
     video.addEventListener('loadedmetadata',restore);
     video.addEventListener('durationchange',restore);
     video.addEventListener('canplay',restore);
+    video.addEventListener('seeked',restore);
+    video.addEventListener('loadeddata',restore);
     try{
       const {default:Hls}=await import('hls.js/light');
       if(attachToken!==restoreToken.current){cancelRestore();return false;}
@@ -131,7 +138,7 @@ export function useAdaptiveQuality(item:MediaItem,videoRef:RefObject<HTMLVideoEl
           if(recoveryToken!==restoreToken.current)return;
           cleanupRecovery();
           video.currentTime=resumeAt;
-          if(shouldPlay)void video.play().catch(()=>{});
+          void playVideo(video,()=>recoveryToken===restoreToken.current&&(playIntent?.current ?? shouldPlay));
         };
         const cleanupRecovery=()=>{
           video.removeEventListener('loadedmetadata',recover);
@@ -143,15 +150,16 @@ export function useAdaptiveQuality(item:MediaItem,videoRef:RefObject<HTMLVideoEl
         video.load();
       }
       setError(reason instanceof Error?reason.message:'Adaptive playback failed.');
+      if(sourceTransition)sourceTransition.current=false;
       setState('error');
       return false;
     }
-  },[applyHlsLevel,destroy,releasePreviousSource,videoRef]);
+  },[applyHlsLevel,destroy,releasePreviousSource,videoRef,playIntent,sourceTransition]);
 
   const start=useCallback(async(audioStream:number|undefined,resumeAt:number,shouldPlay:boolean,keepPlaying=false)=>{
     const token=++requestToken.current;
     const video=videoRef.current;
-    if(!keepPlaying)video?.pause();
+    if(!keepPlaying){if(sourceTransition)sourceTransition.current=true;video?.pause();}
     setState('starting');
     setError('');
     try{
@@ -175,7 +183,7 @@ export function useAdaptiveQuality(item:MediaItem,videoRef:RefObject<HTMLVideoEl
       setState('error');
       return false;
     }
-  },[attach,item.id,videoRef]);
+  },[attach,item.id,videoRef,sourceTransition]);
 
   const setQuality=useCallback((height:number|null)=>{
     selectedRef.current=height;
@@ -188,11 +196,24 @@ export function useAdaptiveQuality(item:MediaItem,videoRef:RefObject<HTMLVideoEl
     const shouldPlay=!video.paused;
     const url=height===null?variants[0].url.replace(/\d+\/index\.m3u8$/,'master.m3u8'):variants.find((variant)=>variant.height===height)?.url;
     if(!url)return;
+    if(sourceTransition)sourceTransition.current=true;
+    restoreToken.current++;
+    restoreCleanupRef.current?.();
+    const token=restoreToken.current;
+    const restore=()=>{
+      if(token!==restoreToken.current)return;
+      cleanup();
+      video.currentTime=currentTime;
+      if(sourceTransition)sourceTransition.current=false;
+      void playVideo(video,()=>token===restoreToken.current&&(playIntent?.current ?? shouldPlay));
+    };
+    const cleanup=()=>{video.removeEventListener('loadedmetadata',restore);if(restoreCleanupRef.current===cleanup)restoreCleanupRef.current=null;};
+    restoreCleanupRef.current=cleanup;
+    video.addEventListener('loadedmetadata',restore,{once:true});
     video.src=url;
-    video.addEventListener('loadedmetadata',()=>{video.currentTime=currentTime;if(shouldPlay)void video.play().catch(()=>{});},{once:true});
     video.load();
     setActiveQuality(height);
-  },[applyHlsLevel,videoRef]);
+  },[applyHlsLevel,videoRef,playIntent,sourceTransition]);
 
   return {state,error,start,selectedQuality,activeQuality,qualityOptions,setQuality,destroy};
 }
