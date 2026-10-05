@@ -244,12 +244,12 @@ export async function createVireloServer(config: RuntimeConfig) {
     const media = db.getMedia(Number(request.params.id));
     if (!media || !existsSync(media.path)) return reply.code(404).send({ error: 'Media file not found' });
     const audioStream = request.body?.audioStream;
+    const info=await probePlaybackInfo(media.path);
     if (audioStream !== undefined) {
       if (!Number.isInteger(audioStream) || audioStream < 0) return reply.code(400).send({ error: 'Invalid audio stream.' });
-      const info = await probePlaybackInfo(media.path);
       if (!info?.audioTracks.some((track) => track.index === audioStream)) return reply.code(400).send({ error: 'Audio stream not found.' });
     }
-    return startHlsTranscode(config.dataDir, media.id, media.path, { audioStream });
+    return startHlsTranscode(config.dataDir, media.id, media.path, { audioStream, copyVideo:info?.videoCodec==='h264' });
   });
   app.get<{ Params: { id: string }; Querystring: { audioStream?: string } }>('/api/media/:id/transcode/status', async (request, reply) => {
     const audioStream = request.query.audioStream === undefined ? undefined : Number(request.query.audioStream);

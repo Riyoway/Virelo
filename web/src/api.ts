@@ -5,6 +5,8 @@ export interface QualityTranscodeState {
   error?:string;
   playlist:string;
   variants:Array<PlaybackQuality&{url:string}>;
+  bufferedUntil?:number;
+  complete?:boolean;
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -40,8 +42,8 @@ export const api = {
   scanStatus: () => request<ScanStatus>('/api/scan/status'),
   refreshMetadata: (id:number) => request<MediaItem>(`/api/media/${id}/metadata/refresh`, { method:'POST' }),
   playbackInfo: (id:number) => request<PlaybackInfo>(`/api/media/${id}/playback`),
-  startTranscode: (id:number,audioStream?:number) => request<{status:string;error?:string;playlist:string}>(`/api/media/${id}/transcode/start`, {method:'POST',body:JSON.stringify(audioStream===undefined?{}:{audioStream})}),
-  transcodeStatus: (id:number,audioStream?:number) => request<{status:string;error?:string;playlist:string}>(withQuery(`/api/media/${id}/transcode/status`,{audioStream})),
+  startTranscode: (id:number,audioStream?:number) => request<{status:string;error?:string;playlist:string;bufferedUntil?:number;complete?:boolean}>(`/api/media/${id}/transcode/start`, {method:'POST',body:JSON.stringify(audioStream===undefined?{}:{audioStream})}),
+  transcodeStatus: (id:number,audioStream?:number) => request<{status:string;error?:string;playlist:string;bufferedUntil?:number;complete?:boolean}>(withQuery(`/api/media/${id}/transcode/status`,{audioStream})),
   startQualityTranscode: (id:number,audioStream?:number) => request<QualityTranscodeState>(`/api/media/${id}/quality/start`,{method:'POST',body:JSON.stringify(audioStream===undefined?{}:{audioStream})}),
   qualityTranscodeStatus: (id:number,audioStream?:number) => request<QualityTranscodeState>(withQuery(`/api/media/${id}/quality/status`,{audioStream})),
   startAudioTranscode: (id:number,audioStream:number) => request<{status:string;error?:string;url:string}>(`/api/media/${id}/audio/start`, {method:'POST',body:JSON.stringify({audioStream})}),

@@ -42,8 +42,9 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
   const initialResumeItem = useRef<number|null>(null);
   const videoFallbackRequested = useRef(false);
   const qualityRequested = useRef(true);
-  const { fallback, error, startFallback } = useHlsFallback(item, videoRef);
-  const {state:qualityState,error:qualityError,start:startQuality,selectedQuality,activeQuality,qualityOptions,setQuality}=useAdaptiveQuality(item,videoRef);
+  const autoBufferTimer = useRef<number|null>(null);
+  const { fallback, error, startFallback, release:releaseFallback } = useHlsFallback(item, videoRef);
+  const {state:qualityState,error:qualityError,start:startQuality,selectedQuality,activeQuality,qualityOptions,setQuality}=useAdaptiveQuality(item,videoRef,releaseFallback);
   const [playbackInfo,setPlaybackInfo] = useState<PlaybackInfo|null>(null);
   const [selectedAudio,setSelectedAudio] = useState<number|null>(null);
   const [selectedSubtitle,setSelectedSubtitle] = useState<number|null>(null);
@@ -53,6 +54,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
   const [audioError,setAudioError] = useState('');
   const [playbackReady,setPlaybackReady] = useState(false);
   const [playing,setPlaying] = useState(false);
+  const [buffering,setBuffering] = useState(false);
   const [current,setCurrent] = useState(0);
   const [duration,setDuration] = useState(item.duration || 0);
   const [volume,setVolume] = useState(1);
@@ -67,6 +69,8 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
     audioSourceToken.current++;
     videoFallbackRequested.current=false;
     qualityRequested.current=true;
+    if(autoBufferTimer.current!==null)window.clearTimeout(autoBufferTimer.current);
+    autoBufferTimer.current=null;
     audioRef.current?.pause();
     if(audioRetryTimer.current!==null)window.clearTimeout(audioRetryTimer.current);
     audioRetryTimer.current=null;
@@ -84,23 +88,29 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
     setAudioError('');
     setPlaybackReady(false);
     setPlaying(false);
+    setBuffering(false);
     setCurrent(0);
     setDuration(item.duration||0);
-  },[item.id,item.duration]);
+  },[item.id]);
 
   useEffect(()=>{
     let alive=true;
+    if(autoPlay)void videoRef.current?.play().catch(()=>{});
     api.playbackInfo(item.id).then(async(info)=>{
       if(!alive)return;
       setPlaybackInfo(info);
       setSelectedAudio(info.defaultAudioStream);
       const preferredQuality=resolvePreferredQuality(info.qualityOptions,readQualityPreference(localPlayback));
       setQuality(preferredQuality);
-      const directLocalPlayback=localPlayback&&(!info.qualityOptions.length||preferredQuality===info.qualityOptions[0]?.height);
-      if(directLocalPlayback){
+      const directPlayback=!info.qualityOptions.length||preferredQuality===null||preferredQuality===info.qualityOptions[0]?.height;
+      if(directPlayback){
         qualityRequested.current=false;
-        if(info.requiresAudioTranscode&&info.defaultAudioStream!==null){
-          await prepareAudio(info.defaultAudioStream,info,true,true);
+        if(info.requiresTranscode||videoRef.current?.error){
+          videoFallbackRequested.current=true;
+          const video=videoRef.current;
+          const position=video?.currentTime||item.progress_position||0;
+          video?.pause();
+          await startFallback(info.defaultAudioStream??undefined,position,Boolean(autoPlay));
         }else{
           setPlaybackReady(true);
           if(autoPlay)void videoRef.current?.play().catch(()=>{});
@@ -127,7 +137,16 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
       if(autoPlay)void videoRef.current?.play().catch(()=>{});
     });
     return()=>{alive=false;audioToken.current++;};
-  },[autoPlay,item.id,item.progress_position,localPlayback,setQuality,startQuality]);
+  },[autoPlay,item.id,localPlayback,setQuality,startQuality,startFallback]);
+
+  useEffect(()=>{
+    if(qualityState!=='active')return;
+    audioRef.current?.pause();
+    setExternalAudioUrl('');
+    setPlaybackReady(true);
+  },[qualityState]);
+
+  useEffect(()=>{if(fallback==='active')setPlaybackReady(true);},[fallback]);
 
   useEffect(()=>{setActiveCaption('');},[item.id,selectedSubtitle]);
 
@@ -224,7 +243,38 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
     };
   },[]);
 
-  useEffect(()=>()=>{if(controlsTimer.current!==null)window.clearTimeout(controlsTimer.current);},[]);
+  useEffect(()=>()=>{
+    if(controlsTimer.current!==null)window.clearTimeout(controlsTimer.current);
+    if(autoBufferTimer.current!==null)window.clearTimeout(autoBufferTimer.current);
+  },[]);
+
+  useEffect(()=>{
+    const video=videoRef.current;
+    if(!buffering||!video||video.seeking||localPlayback||selectedQuality!==null||!playbackReady||qualityState!=='idle')return;
+    autoBufferTimer.current=window.setTimeout(()=>{
+      autoBufferTimer.current=null;
+      if(video.paused||video.seeking||video.readyState>=HTMLMediaElement.HAVE_FUTURE_DATA)return;
+      qualityRequested.current=true;
+      void startQuality(selectedAudio??undefined,video.currentTime,true,true).then((ready)=>{
+        if(!ready)qualityRequested.current=false;
+      });
+    },1500);
+    return()=>{
+      if(autoBufferTimer.current!==null)window.clearTimeout(autoBufferTimer.current);
+      autoBufferTimer.current=null;
+    };
+  },[buffering,localPlayback,playbackReady,qualityState,selectedAudio,selectedQuality,startQuality]);
+
+  function handleWaiting(){
+    audioRef.current?.pause();
+    setBuffering(true);
+  }
+  function handlePlaying(){
+    setBuffering(false);
+    if(autoBufferTimer.current!==null)window.clearTimeout(autoBufferTimer.current);
+    autoBufferTimer.current=null;
+    syncExternalAudio(true);
+  }
 
   function usesTouchControls(){return window.matchMedia('(hover: none), (pointer: coarse)').matches;}
   function revealControls(){
@@ -292,7 +342,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
   async function togglePip(){const v=videoRef.current;if(!v||!pipSupported)return;if(document.pictureInPictureElement)await document.exitPictureInPicture();else await v.requestPictureInPicture().catch(()=>{});}
 
   async function prepareAudio(stream:number,info=playbackInfo,initial=false,skipAdaptive=false){
-    if(!info||videoFallbackRequested.current)return;
+    if(!info||(videoFallbackRequested.current&&fallback!=='active'))return;
     if(!initial&&selectedAudio===stream&&!audioPreparing)return;
     const video=videoRef.current;
     const token=++audioToken.current;
@@ -306,7 +356,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
     video?.pause();
     audioRef.current?.pause();
 
-    if(!skipAdaptive&&info.qualityOptions.length&&(!localPlayback||qualityState==='active')){
+    if(!skipAdaptive&&info.qualityOptions.length&&qualityState==='active'){
       qualityRequested.current=true;
       resumeAfterAudio.current=false;
       audioResumeAt.current=null;
@@ -357,7 +407,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
   async function selectQuality(height:number|null){
     saveQualityPreference(height);
     setQuality(height);
-    if(!localPlayback||qualityState==='active'||qualityState==='starting'||height===playbackInfo?.qualityOptions[0]?.height)return;
+    if(qualityState==='active'||qualityState==='starting'||height===null||height===playbackInfo?.qualityOptions[0]?.height)return;
     const video=videoRef.current;
     const shouldResume=Boolean(video&&!video.paused);
     qualityRequested.current=true;
@@ -395,8 +445,8 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
       crossOrigin="anonymous"
       onClick={handleVideoClick}
       onPlay={()=>{setPlaying(true);syncExternalAudio(true);requestExternalAudioPlayback();revealControls();scheduleControlsHide();}}
-      onPlaying={()=>syncExternalAudio(true)}
-      onWaiting={()=>audioRef.current?.pause()}
+      onPlaying={handlePlaying}
+      onWaiting={handleWaiting}
       onPause={(e)=>{audioRef.current?.pause();if(audioRetryTimer.current!==null)window.clearTimeout(audioRetryTimer.current);audioRetryTimer.current=null;audioRetryCount.current=0;setPlaying(false);revealControls();const v=e.currentTarget;void api.progress(playbackItemId.current,v.currentTime,fullDuration(v.duration,item.duration,duration));}}
       onLoadedMetadata={(e)=>{
         const v=e.currentTarget;playbackItemId.current=item.id;setDuration(fullDuration(v.duration,item.duration));
@@ -409,7 +459,6 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
       onDurationChange={(e)=>setDuration(fullDuration(e.currentTarget.duration,item.duration,duration))}
       onCanPlay={(e)=>{
         if(!e.currentTarget.paused)syncExternalAudio(true);
-        if(autoPlay&&playbackReady&&e.currentTarget.paused)void e.currentTarget.play().catch(()=>{});
       }}
       onTimeUpdate={(e)=>{
         const v=e.currentTarget;setCurrent(v.currentTime);syncExternalAudio(!v.paused);
@@ -429,10 +478,10 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
     </video>
     <audio ref={audioRef} preload="auto"/>
     <DraggableCaption key={`${item.id}:${selectedSubtitle}`} text={activeCaption} controlsVisible={controlsVisible} containerRef={containerRef} onDraggingChange={(dragging)=>{if(dragging)revealControls();else window.setTimeout(scheduleControlsHide,0);}}/>
-    {qualityState==='starting'&&<div className="player-status"><SpinnerGap className="spin"/><strong>{selectedQuality===null?'Preparing Auto quality…':`Preparing ${qualityLabel(selectedQuality)}…`}</strong><span>Creating network-adaptive versions. They will be reused next time.</span></div>}
+    {qualityState==='starting'&&(!playing||buffering)&&<div className="player-status"><SpinnerGap className="spin"/><strong>{selectedQuality===null?'Buffering…':`Switching to ${qualityLabel(selectedQuality)}…`}</strong></div>}
     {audioPreparing&&<div className="player-status"><SpinnerGap className="spin"/><strong>Preparing audio…</strong><span>Only the audio track is being converted. The cached result will be reused.</span></div>}
-    {fallback==='starting' && <div className="player-status"><SpinnerGap className="spin"/><strong>Preparing video…</strong><span>The original video codec is not supported by this browser.</span></div>}
-    {(fallback==='error'||audioError||(qualityState==='error'&&qualityRequested.current)) && <div className="player-status error"><strong>Playback unavailable</strong><span>{audioError||error||qualityError}</span></div>}
+    {fallback==='starting'&&(!playing||buffering) && <div className="player-status"><SpinnerGap className="spin"/><strong>{playbackInfo?.requiresVideoTranscode?'Preparing video…':'Preparing audio…'}</strong></div>}
+    {(fallback==='error'||audioError||(qualityState==='error'&&qualityRequested.current&&!playing)) && <div className="player-status error"><strong>Playback unavailable</strong><span>{audioError||error||qualityError}</span></div>}
     <div className="player-gradient"/>
     <div className="player-controls">
       <input className="player-seek" aria-label="Seek" type="range" min="0" max={Math.max(duration,1)} step="0.1" value={Math.min(current,Math.max(duration,1))} onChange={(e)=>seek(Number(e.target.value))}/>
@@ -456,7 +505,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
           selectedQuality={selectedQuality}
           activeQuality={activeQuality}
           allowAutoQuality={!localPlayback}
-          busy={qualityState==='starting'||audioPreparing||fallback==='starting'}
+          busy={audioPreparing||fallback==='starting'}
           onSelectAudio={(stream)=>void prepareAudio(stream)}
           onSelectSubtitle={setSelectedSubtitle}
           onSelectQuality={(height)=>void selectQuality(height)}

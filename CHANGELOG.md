@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Start playable videos directly on LAN connections instead of waiting for Auto quality renditions; prepare adaptive HLS only after sustained buffering.
+- Keep preparation indicators off already-playing video and retain the session's bandwidth estimate between adaptive videos.
+- Start compatible HLS from completed segments while conversion continues, copying H.264 video when only audio needs conversion.
+- Preserve playback positions during progressive HLS handoffs and keep interrupted caches and failed conversion jobs from being mistaken for ready playback.
+
 ## 0.2.1 — 2026-08-22
 
 - Fixed first-play audio fallback starting before FFmpeg had finished writing the converted HLS playlist.

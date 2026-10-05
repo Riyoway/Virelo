@@ -1,5 +1,5 @@
-import { mkdirSync, existsSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, existsSync, readFileSync, rmSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { hasFfmpeg, type PlaybackQuality } from './ffmpeg.js';
 
@@ -7,10 +7,13 @@ export interface TranscodeState {
   status: 'idle'|'starting'|'running'|'ready'|'error';
   error?: string;
   playlist: string;
+  bufferedUntil?: number;
+  complete?: boolean;
 }
 
 export interface TranscodeOptions {
   audioStream?: number;
+  copyVideo?: boolean;
 }
 
 export interface AudioTranscodeState {
@@ -24,6 +27,8 @@ export interface AdaptiveTranscodeState {
   error?: string;
   playlist: string;
   variants: Array<PlaybackQuality & { url: string }>;
+  bufferedUntil?: number;
+  complete?: boolean;
 }
 
 export interface AdaptiveTranscodeOptions {
@@ -57,11 +62,35 @@ function adaptiveVariants(id:number,audioStream:number|undefined,qualities:Playb
   return qualities.map((quality)=>({...quality,url:`/hls/${id}/${adaptiveName(audioStream)}/${quality.height}/index.m3u8`}));
 }
 
+// FFmpeg publishes playlists atomically. Only advertise media whose segment files
+// are already present; a playlist alone does not mean playback is possible.
+function playlistProgress(playlist:string){
+  try{
+    const content=readFileSync(playlist,'utf8');
+    const lines=content.split(/\r?\n/);
+    let duration=0;
+    let segmentDuration=0;
+    let segments=0;
+    for(const line of lines){
+      if(line.startsWith('#EXTINF:'))segmentDuration=Number.parseFloat(line.slice(8));
+      else if(line&& !line.startsWith('#')){
+        if(!Number.isFinite(segmentDuration)||segmentDuration<=0||!existsSync(join(dirname(playlist),line)))return null;
+        duration+=segmentDuration;segments++;segmentDuration=0;
+      }
+    }
+    return segments?{duration,segments,complete:content.includes('#EXT-X-ENDLIST')}:null;
+  }catch{return null;}
+}
+
 export function adaptiveTranscodeStatus(dataDir:string,id:number,audioStream:number|undefined,qualities:PlaybackQuality[]):AdaptiveTranscodeState {
   const running=adaptiveJobs.get(adaptiveKey(id,audioStream))?.state;
   const variants=adaptiveVariants(id,audioStream,qualities);
-  if(existsSync(adaptivePlaylist(dataDir,id,audioStream))&&variants.every((variant)=>existsSync(join(adaptiveDir(dataDir,id,audioStream),String(variant.height),'segment-00000.ts')))){
-    return {status:'ready',playlist:adaptiveUrl(id,audioStream),variants};
+  if(running?.status==='error')return running;
+  const progress=qualities.map((quality)=>playlistProgress(join(adaptiveDir(dataDir,id,audioStream),String(quality.height),'index.m3u8')));
+  if(progress.length&&progress.every((entry)=>entry!==null)&&existsSync(adaptivePlaylist(dataDir,id,audioStream))){
+    const bufferedUntil=Math.min(...progress.map((entry)=>entry!.duration));
+    const complete=progress.every((entry)=>entry!.complete);
+    if(complete||running)return {status:'ready',playlist:adaptiveUrl(id,audioStream),variants,bufferedUntil,complete};
   }
   return running||{status:'idle',playlist:adaptiveUrl(id,audioStream),variants};
 }
@@ -98,8 +127,8 @@ export async function startAdaptiveTranscode(dataDir:string,id:number,source:str
     if(options.hasAudio)args.push(`-c:a:${index}`,'aac',`-b:a:${index}`,index===0?'160k':'128k',`-ac:a:${index}`,'2');
   }
   args.push(
-    '-force_key_frames','expr:gte(t,n_forced*4)','-sc_threshold','0',
-    '-f','hls','-hls_time','4','-hls_playlist_type','event','-hls_flags','independent_segments+temp_file',
+    '-force_key_frames','expr:gte(t,n_forced*2)','-sc_threshold','0',
+    '-f','hls','-hls_time','2','-hls_playlist_type','event','-hls_flags','independent_segments+temp_file',
     '-master_pl_name','master.m3u8',
     '-var_stream_map',qualities.map((quality,index)=>options.hasAudio?`v:${index},a:${index},name:${quality.height}`:`v:${index},name:${quality.height}`).join(' '),
     '-hls_segment_filename',join(dir,'%v','segment-%05d.ts').replaceAll('\\','/'),join(dir,'%v','index.m3u8').replaceAll('\\','/')
@@ -111,18 +140,21 @@ export async function startAdaptiveTranscode(dataDir:string,id:number,source:str
   adaptiveJobs.set(key,{child,state});
   state.status='running';
   child.stderr?.on('data',(chunk)=>{const text=String(chunk).trim();if(text)state.error=text.slice(-500);});
-  child.once('error',(error)=>{state.status='error';state.error=error.message;rmSync(dir,{recursive:true,force:true});adaptiveJobs.delete(key);});
+  child.once('error',(error)=>{state.status='error';state.error=error.message;rmSync(dir,{recursive:true,force:true});});
   child.once('exit',(code)=>{
     if(code===0&&existsSync(adaptivePlaylist(dataDir,id,audioStream))){state.status='ready';state.error=undefined;}
     else{state.status='error';if(!state.error)state.error=`FFmpeg exited with code ${code}`;rmSync(dir,{recursive:true,force:true});}
-    adaptiveJobs.delete(key);
+    if(state.status==='ready')adaptiveJobs.delete(key);
   });
   return state;
 }
 
 export function transcodeStatus(dataDir:string,id:number,audioStream?:number):TranscodeState {
-  if (existsSync(hlsPlaylist(dataDir,id,audioStream))) return {status:'ready',playlist:playlistUrl(id,audioStream)};
-  return jobs.get(jobKey(id,audioStream))?.state || {status:'idle',playlist:playlistUrl(id,audioStream)};
+  const running=jobs.get(jobKey(id,audioStream))?.state;
+  if(running?.status==='error')return running;
+  const progress=playlistProgress(hlsPlaylist(dataDir,id,audioStream));
+  if(progress&&(progress.complete||(running&&progress.segments>=2)))return {status:'ready',playlist:playlistUrl(id,audioStream),bufferedUntil:progress.duration,complete:progress.complete};
+  return running || {status:'idle',playlist:playlistUrl(id,audioStream)};
 }
 
 export async function startHlsTranscode(dataDir:string,id:number,source:string,options:TranscodeOptions={}):Promise<TranscodeState> {
@@ -141,10 +173,9 @@ export async function startHlsTranscode(dataDir:string,id:number,source:string,o
     child = spawn(process.env.FFMPEG_PATH || 'ffmpeg',[
       '-hide_banner','-loglevel','warning','-i',source,
       '-map','0:v:0','-map',audioMap,
-      '-c:v','libx264','-preset','veryfast','-crf','21','-pix_fmt','yuv420p',
+      ...(options.copyVideo?['-c:v','copy']:['-c:v','libx264','-preset','veryfast','-crf','21','-pix_fmt','yuv420p','-force_key_frames','expr:gte(t,n_forced*2)']),
       '-c:a','aac','-b:a','192k','-ac','2',
-      '-force_key_frames','expr:gte(t,n_forced*4)',
-      '-f','hls','-hls_time','4','-hls_playlist_type','vod','-hls_flags','independent_segments',
+      '-f','hls','-hls_time','2','-hls_playlist_type','event','-hls_flags','independent_segments+temp_file',
       '-hls_segment_filename',join(dir,'segment-%05d.ts'),playlist
     ],{windowsHide:true});
   } catch (error) {
@@ -159,11 +190,11 @@ export async function startHlsTranscode(dataDir:string,id:number,source:string,o
     const text=String(chunk).trim();
     if(text) state.error=text.slice(-500);
   });
-  child.once('error',(error)=>{state.status='error';state.error=error.message;jobs.delete(key);});
+  child.once('error',(error)=>{state.status='error';state.error=error.message;});
   child.once('exit',(code)=>{
     state.status=code===0 && existsSync(playlist)?'ready':'error';
     if(code!==0 && !state.error) state.error=`FFmpeg exited with code ${code}`;
-    jobs.delete(key);
+    if(state.status==='ready')jobs.delete(key);
   });
   return state;
 }
