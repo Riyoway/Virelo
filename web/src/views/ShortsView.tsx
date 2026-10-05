@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
-import { ArrowDown, ArrowLeft, Heart, Pause, PictureInPicture, Play, SpeakerHigh, SpeakerSlash, SpinnerGap } from '@phosphor-icons/react';
+import { ArrowDown, ArrowLeft, Heart, PictureInPicture, SpeakerHigh, SpeakerSlash, SpinnerGap } from '@phosphor-icons/react';
 import { api } from '../api';
+import { playVideo } from '../utils/media-playback';
 import { MediaContextMenu } from '../components/MediaContextMenu';
 import { useHlsFallback } from '../hooks/useHlsFallback';
 import type { ShortItem } from '../types';
@@ -13,12 +14,17 @@ const RENDER_WINDOW = 2;
 export function ShortsView() {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [activeIndex, setActiveIndex] = useState(0);
+  const activeIndexRef = useRef(0);
+  const scrollerHeight = useRef(0);
+  activeIndexRef.current = activeIndex;
   const [pipOn, setPipOn] = useState(false);
+  const [seed] = useState(() => crypto.getRandomValues(new Uint32Array(1))[0]);
 
   const query = useInfiniteQuery({
-    queryKey: ['shorts'],
-    queryFn: ({ pageParam }) => api.shorts({ limit: PAGE_SIZE, offset: pageParam }),
+    queryKey: ['shorts', seed],
+    queryFn: ({ pageParam }) => api.shorts({ limit: PAGE_SIZE, offset: pageParam, seed }),
     initialPageParam: 0,
+    gcTime: 0,
     getNextPageParam: (page, all) => {
       const loaded = all.reduce((n, p) => n + p.items.length, 0);
       return loaded < page.total ? loaded : undefined;
@@ -33,7 +39,7 @@ export function ShortsView() {
 
   const onScroll = useCallback(() => {
     const el = scrollerRef.current;
-    if (!el || el.clientHeight < 1) return;
+    if (!el || el.clientHeight < 1 || scrollerHeight.current !== el.clientHeight) return;
     const index = Math.round(el.scrollTop / el.clientHeight);
     setActiveIndex((prev) => (prev === index ? prev : index));
   }, []);
@@ -42,8 +48,21 @@ export function ShortsView() {
     const el = scrollerRef.current;
     if (!el || items.length === 0) return;
     const clamped = Math.max(0, Math.min(index, items.length - 1));
-    el.scrollTo({ top: clamped * el.clientHeight, behavior: 'smooth' });
+    el.scrollTo({ top: clamped * el.clientHeight, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
   }, [items.length]);
+
+  useLayoutEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const align = () => {
+      scrollerHeight.current = el.clientHeight;
+      el.scrollTo({ top: activeIndexRef.current * el.clientHeight, behavior: 'instant' });
+    };
+    align();
+    const observer = new ResizeObserver(align);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [items.length > 0]);
 
   useEffect(() => {
     if (hasNextPage && items.length - activeIndex < 4) void query.fetchNextPage();
@@ -51,7 +70,7 @@ export function ShortsView() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.defaultPrevented || (e.target instanceof Element && e.target.closest('input, textarea, select, button, [role="menu"], [role="dialog"]'))) return;
       if (e.key === 'ArrowDown' || e.key === 'PageDown') { e.preventDefault(); goTo(activeIndex + 1); }
       else if (e.key === 'ArrowUp' || e.key === 'PageUp') { e.preventDefault(); goTo(activeIndex - 1); }
       else if (e.key === 'Home') { e.preventDefault(); goTo(0); }
@@ -61,6 +80,7 @@ export function ShortsView() {
     return () => window.removeEventListener('keydown', onKey);
   }, [goTo, activeIndex, items.length]);
 
+  if (query.isError && items.length === 0) return <div className="shorts-empty"><p>Shorts could not be loaded.</p><button onClick={() => void query.refetch()}>Try again</button></div>;
   if (query.isLoading) return <div className="shorts-loading skeleton" />;
   if (!query.isFetching && total === 0 && items.length === 0) {
     return (
@@ -97,12 +117,14 @@ function ShortsClip({ item, active, onSkip, pipOn, onPip }: { item: ShortItem; a
   const navigate = useNavigate();
   const isLandscape = item.width !== null && item.height !== null && item.width > item.height;
   const videoRef = useRef<HTMLVideoElement>(null);
+  const wantsPlayback = useRef(active);
+  const activeRef = useRef(active);
+  activeRef.current = active;
   const longPressTimer = useRef<number | null>(null);
   const longPressTriggered = useRef(false);
-  const { fallback, error, startFallback } = useHlsFallback(item, videoRef);
+  const { fallback, error, startFallback } = useHlsFallback(item, videoRef, wantsPlayback);
   const lastReport = useRef(0);
   const [muted, setMuted] = useState(false);
-  const [playing, setPlaying] = useState(false);
   const [liked, setLiked] = useState(item.liked === 1);
   const [likeBusy, setLikeBusy] = useState(false);
   const [pip, setPip] = useState(false);
@@ -131,6 +153,7 @@ function ShortsClip({ item, active, onSkip, pipOn, onPip }: { item: ShortItem; a
   }, [onPip]);
 
   function requestPip(video: HTMLVideoElement, attempts = 0) {
+    if (!activeRef.current || !video.isConnected) return;
     if (attempts > 3) { setPip(false); onPip(false); return; }
     const current = document.pictureInPictureElement;
     if (current === video) return;
@@ -150,7 +173,10 @@ function ShortsClip({ item, active, onSkip, pipOn, onPip }: { item: ShortItem; a
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
+    wantsPlayback.current = active;
+    let cancelled = false;
     if (!active) {
+      setMenuPosition(null);
       video.pause();
       if (document.pictureInPictureElement === video) void document.exitPictureInPicture().catch(() => {});
       return;
@@ -159,24 +185,22 @@ function ShortsClip({ item, active, onSkip, pipOn, onPip }: { item: ShortItem; a
     const resume = item.progress_position || 0;
     setVideoDuration(duration);
     setCurrentTime(resume);
-    if (resume > 5 && !item.progress_completed && (!duration || resume < duration * 0.92)) video.currentTime = resume;
+    if (resume > 5 && !item.progress_completed && (!duration || resume < duration * 0.92)) {
+      try { video.currentTime = resume; } catch { /* retry after metadata */ }
+    }
     setProgress(duration > 0 ? Math.min(100, (resume / duration) * 100) : 0);
     video.muted = false;
     setMuted(false);
-    const followPip = () => { if (pipOn && document.pictureInPictureEnabled && typeof video.requestPictureInPicture === 'function') requestPip(video); };
-    video.play()
-      .then(followPip)
-      .catch(() => {
-        video.muted = true;
-        setMuted(true);
-        return video.play().then(followPip).catch(() => {});
-      });
+    const followPip = () => { if (!cancelled && activeRef.current && pipOn && document.pictureInPictureEnabled && typeof video.requestPictureInPicture === 'function') requestPip(video); };
+    void playVideo(video, () => !cancelled && activeRef.current && wantsPlayback.current, () => setMuted(true)).then(followPip);
+    return () => { cancelled = true; video.pause(); };
   }, [active, item.id]);
 
   function togglePlay() {
     const video = videoRef.current;
     if (!video) return;
-    if (video.paused) void video.play(); else video.pause();
+    wantsPlayback.current = video.paused;
+    if (wantsPlayback.current) void playVideo(video, () => activeRef.current && wantsPlayback.current, () => setMuted(true)); else video.pause();
   }
 
   function toggleMute() {
@@ -234,7 +258,7 @@ function ShortsClip({ item, active, onSkip, pipOn, onPip }: { item: ShortItem; a
   }
 
   function handlePointerDown(event: React.PointerEvent<HTMLDivElement>) {
-    if (event.pointerType !== 'touch') return;
+    if (event.pointerType !== 'touch' || (event.target instanceof Element && event.target.closest('input, button, [role="menu"]'))) return;
     clearLongPress();
     longPressTriggered.current = false;
     longPressTimer.current = window.setTimeout(() => {
@@ -258,12 +282,16 @@ function ShortsClip({ item, active, onSkip, pipOn, onPip }: { item: ShortItem; a
           className={`short-video${isLandscape ? ' landscape' : ''}`}
           src={`/api/media/${item.id}/stream`}
           preload={active ? 'auto' : 'metadata'}
-          autoPlay={active}
+          autoPlay={false}
           muted={muted}
+          tabIndex={active ? 0 : -1}
+          aria-label={`${item.title}. Press Space to play or pause.`}
+          onKeyDown={(event) => { if (event.key === ' ' || event.key === 'k' || event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); togglePlay(); } }}
           playsInline
           onLoadedMetadata={(e) => {
             const nextDuration = Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : item.duration || 0;
             if (nextDuration > 0) setVideoDuration(nextDuration);
+            if (e.currentTarget.paused) void playVideo(e.currentTarget, () => activeRef.current && wantsPlayback.current, () => setMuted(true));
           }}
           onClick={() => {
             if (longPressTriggered.current) {
@@ -272,9 +300,7 @@ function ShortsClip({ item, active, onSkip, pipOn, onPip }: { item: ShortItem; a
             }
             togglePlay();
           }}
-          onPlay={() => setPlaying(true)}
           onPause={(e) => {
-            setPlaying(false);
             void api.progress(item.id, e.currentTarget.currentTime, e.currentTarget.duration);
           }}
           onTimeUpdate={(e) => report(e.currentTarget)}
@@ -283,23 +309,16 @@ function ShortsClip({ item, active, onSkip, pipOn, onPip }: { item: ShortItem; a
             setProgress(0);
             void api.progress(item.id, e.currentTarget.duration, e.currentTarget.duration);
             e.currentTarget.currentTime = 0;
-            void e.currentTarget.play().catch(() => {});
+            void playVideo(e.currentTarget, () => activeRef.current && wantsPlayback.current, () => setMuted(true));
           }}
-          onError={() => { if (fallback === 'idle') void startFallback(); }}
+          onError={() => { if (activeRef.current && fallback === 'idle') void startFallback(undefined, videoRef.current?.currentTime, wantsPlayback.current); }}
         />
-        {fallback === 'starting' && (
+        {fallback === 'starting' && active && wantsPlayback.current && videoRef.current?.paused && (
           <div className="short-status"><SpinnerGap className="spin" /><strong>Preparing video…</strong><span>This may take a moment.</span></div>
         )}
         {fallback === 'error' && (
           <div className="short-status error"><strong>Playback unavailable</strong><span>{error}</span></div>
         )}
-        {!playing && active && fallback !== 'starting' && fallback !== 'error' && (
-          <div className="short-pause-chip"><Play weight="fill" /></div>
-        )}
-        <div className="short-top-actions">
-          <button onClick={togglePlay} aria-label={playing ? 'Pause' : 'Play'}>{playing ? <Pause weight="fill" /> : <Play weight="fill" />}</button>
-          <button onClick={toggleMute} aria-label={muted ? 'Unmute' : 'Mute'}>{muted ? <SpeakerSlash weight="fill" /> : <SpeakerHigh weight="fill" />}</button>
-        </div>
         <input
           className="short-progress"
           type="range"
@@ -337,13 +356,18 @@ function ShortsClip({ item, active, onSkip, pipOn, onPip }: { item: ShortItem; a
       {menuPosition && <MediaContextMenu
         item={{...item, liked: liked ? 1 : 0}}
         position={menuPosition}
+        returnFocus={videoRef.current}
         favorite={liked}
         onFavorite={toggleLike}
         onPlay={() => void navigate({to:'/shorts'})}
         onDetails={() => void navigate({to:'/title/$mediaId',params:{mediaId:String(item.id)}})}
         onClose={() => setMenuPosition(null)}
       />}
-      <div className="short-actions">
+      {active && <div className="short-actions">
+        <button onClick={toggleMute} aria-label={muted ? 'Unmute' : 'Mute'} aria-pressed={muted}>
+          {muted ? <SpeakerSlash weight="fill" /> : <SpeakerHigh weight="fill" />}
+          <span>{muted ? 'Unmute' : 'Mute'}</span>
+        </button>
         <button className={liked ? 'liked' : ''} onClick={() => void toggleLike()} aria-label={liked ? 'Unlike' : 'Like'}>
           <Heart weight={liked ? 'fill' : 'regular'} />
           <span>{liked ? 'Liked' : 'Like'}</span>
@@ -356,7 +380,7 @@ function ShortsClip({ item, active, onSkip, pipOn, onPip }: { item: ShortItem; a
           <ArrowDown weight="bold" />
           <span>Next</span>
         </button>
-      </div>
+      </div>}
     </>
   );
 }

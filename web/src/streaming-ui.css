@@ -24,7 +24,9 @@
 .app-shell .desktop-nav a.active { font-weight:650; }
 .app-shell .desktop-nav a:focus-visible { outline:2px solid var(--color-focus); outline-offset:4px; }
 .app-shell .header-search-shell.open { border-radius:4px; }
-.app-shell .header-search-shell:focus-within { outline:2px solid var(--color-focus); outline-offset:2px; }
+.app-shell .header-search-shell:focus-within { outline:none; box-shadow:inset 0 0 0 2px var(--color-focus); }
+.app-shell .header-search-toggle:focus-visible { outline:none!important; box-shadow:inset 0 0 0 2px var(--color-focus)!important; }
+.app-shell :is(.input, select, .picker-trigger):focus-visible { outline-offset:-3px; }
 .app-shell .brand { font-size:25px; }
 .app-shell .brand-mark { width:38px; height:38px; }
 .app-shell .settings-button svg { width:22px!important; height:22px!important; }
@@ -176,3 +178,29 @@
 @media (prefers-reduced-motion:reduce) {
   .app-shell .settings-nav-item { transition:none; }
 }
+
+/* Flat seek tracks: native range chrome adds a white bevel on Chromium. */
+.app-shell :is(.player-seek, .volume-slider) { appearance:none; border:0; padding:0; background:transparent; height:24px; border-radius:0; --range-fill:0%; --range-color:var(--color-brand); }
+.app-shell .volume-slider { --range-color:var(--text); }
+.app-shell :is(.player-seek, .volume-slider)::-webkit-slider-runnable-track { height:4px; border:0; box-shadow:none; border-radius:2px; background:linear-gradient(to right,var(--range-color) var(--range-fill),#555 var(--range-fill)); }
+.app-shell :is(.player-seek, .volume-slider)::-webkit-slider-thumb { appearance:none; width:14px; height:14px; margin-top:-5px; border:0; border-radius:50%; background:var(--range-color); box-shadow:none; }
+.app-shell :is(.player-seek, .volume-slider)::-moz-range-track { height:4px; border:0; border-radius:2px; background:#555; }
+.app-shell :is(.player-seek, .volume-slider)::-moz-range-progress { height:4px; border:0; background:var(--range-color); }
+.app-shell :is(.player-seek, .volume-slider)::-moz-range-thumb { width:14px; height:14px; border:0; border-radius:50%; background:var(--range-color); }
+.app-shell :is(.player-seek, .volume-slider):focus-visible { outline:2px solid var(--color-focus); outline-offset:-2px; }
+.app-shell .short-progress::-webkit-slider-runnable-track { border:0; box-shadow:none; }
+.app-shell .short-progress::-moz-range-track { border:0; box-shadow:none; }
+.app-shell .short-progress:focus-visible::-webkit-slider-thumb { box-shadow:0 0 0 3px var(--color-focus); }
+.app-shell .short-progress:focus-visible::-moz-range-thumb { box-shadow:0 0 0 3px var(--color-focus); }
+.media-context-menu { max-height:calc(100dvh - 24px); overflow:auto; overscroll-behavior:contain; }
+
+@media (max-width:900px) and (max-height:500px) {
+  .app-shell .short-video { object-fit:contain; }
+  .app-shell .short-actions { gap:6px; bottom:calc(var(--mobile-dock-offset) + 20px); }
+  .app-shell .short-actions button { min-height:44px; min-width:44px; justify-content:center; }
+  .app-shell .short-actions button svg { width:36px; height:36px; padding:8px; }
+  .app-shell .short-actions button span { display:none; }
+  .app-shell .short-info { padding-top:20px; padding-bottom:22px; }
+}
+
+.app-shell .player-status, .app-shell .short-status:not(.error) { pointer-events:none; }

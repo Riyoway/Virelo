@@ -12,6 +12,7 @@ const HOVER_CAPABLE = typeof window !== 'undefined' && window.matchMedia('(hover
 export function MediaCard({item, compact=false, short=false, playDirect=false, preview=false, onHoverChange, layout='auto'}:{item:MediaItem;layout?:'auto'|'landscape'|'poster';compact?:boolean;short?:boolean;playDirect?:boolean;preview?:boolean;onHoverChange?:(hovered:boolean)=>void}) {
   const navigate = useNavigate();
   const client = useQueryClient();
+  const cardRef = useRef<HTMLAnchorElement>(null);
   const [menuPosition, setMenuPosition] = useState<{x:number;y:number}|null>(null);
   const [favorite, setFavorite] = useState(Boolean(item.liked));
   const longPressTimer = useRef<number | null>(null);
@@ -70,7 +71,7 @@ export function MediaCard({item, compact=false, short=false, playDirect=false, p
   };
   const goToDetails = () => void navigate({to:'/title/$mediaId',params:{mediaId:String(item.id)}});
   return (
-    <Link to={destination} params={short ? undefined : {mediaId:String(item.id)}} aria-label={progressLabel ? `${progressLabel}: ${item.title}` : undefined} className={`media-card ${isPoster?'art-poster':''} ${compact?'compact':''} ${playDirect?'resume-card ':''}${short?`shorts-card ${isPortrait?'art-portrait':'art-landscape'}`:''}${preview?' previewing':''}`} preload="intent"
+    <Link ref={cardRef} to={destination} params={short ? undefined : {mediaId:String(item.id)}} aria-label={progressLabel ? `${progressLabel}: ${item.title}` : undefined} className={`media-card ${isPoster?'art-poster':''} ${compact?'compact':''} ${playDirect?'resume-card ':''}${short?`shorts-card ${isPortrait?'art-portrait':'art-landscape'}`:''}${preview?' previewing':''}`} preload="intent"
       onMouseEnter={HOVER_CAPABLE && onHoverChange ? ()=>onHoverChange(true) : undefined}
       onMouseLeave={HOVER_CAPABLE && onHoverChange ? ()=>onHoverChange(false) : undefined}
       onContextMenu={(event) => { event.preventDefault(); openMenu(event.clientX, event.clientY); }}
@@ -93,6 +94,7 @@ export function MediaCard({item, compact=false, short=false, playDirect=false, p
       {menuPosition && <MediaContextMenu
         item={{...item, liked: favorite ? 1 : 0}}
         position={menuPosition}
+        returnFocus={cardRef.current}
         favorite={favorite}
         onFavorite={() => { const next = !favorite; setFavorite(next); favoriteMutation.mutate(next); }}
         onPlay={goToPlayback}
