@@ -30,7 +30,7 @@ export function Header() {
           <span className="brand-name">Virelo</span>
         </Link>
         <nav className="desktop-nav" aria-label="Main navigation">
-          <Link to="/" activeProps={{className:'active'}}>Home</Link>
+          <Link to="/" activeOptions={{exact:true}} activeProps={{className:'active'}}>Home</Link>
           <Link to="/library" activeProps={{className:'active'}}>Library</Link>
           <Link to="/shorts" activeProps={{className:'active'}}>Shorts</Link>
         </nav>

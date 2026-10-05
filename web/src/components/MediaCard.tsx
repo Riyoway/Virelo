@@ -9,7 +9,7 @@ import { MediaContextMenu } from './MediaContextMenu';
 
 const HOVER_CAPABLE = typeof window !== 'undefined' && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
 
-export function MediaCard({item, compact=false, short=false, playDirect=false, preview=false, onHoverChange}:{item:MediaItem;compact?:boolean;short?:boolean;playDirect?:boolean;preview?:boolean;onHoverChange?:(hovered:boolean)=>void}) {
+export function MediaCard({item, compact=false, short=false, playDirect=false, preview=false, onHoverChange, layout='auto'}:{item:MediaItem;layout?:'auto'|'landscape'|'poster';compact?:boolean;short?:boolean;playDirect?:boolean;preview?:boolean;onHoverChange?:(hovered:boolean)=>void}) {
   const navigate = useNavigate();
   const client = useQueryClient();
   const [menuPosition, setMenuPosition] = useState<{x:number;y:number}|null>(null);
@@ -34,6 +34,11 @@ export function MediaCard({item, compact=false, short=false, playDirect=false, p
   const progressDuration = item.progress_duration || item.duration || 0;
   const progress = progressDuration > 0 ? Math.min(100, ((item.progress_position || 0) / progressDuration) * 100) : 0;
   const isPortrait = Boolean(item.width && item.height && item.height > item.width);
+  const hasPoster = Boolean(item.poster_path && (item.kind === 'movie' || (item.kind === 'series' && item.episode === null)));
+  const isPoster = !short && !playDirect && (layout === 'poster' || (layout === 'auto' && hasPoster));
+  const imageKinds: Array<'poster' | 'backdrop' | 'thumbnail'> = isPoster ? ['poster', 'backdrop', 'thumbnail'] : ['backdrop', 'thumbnail', 'poster'];
+  const imageSources = [...new Set(imageKinds.filter((kind) => kind === 'thumbnail' || Boolean(kind === 'poster' ? item.poster_path : item.backdrop_path)).map((kind) => artwork(item, kind)))];
+  const details = [item.kind === 'series' && item.season !== null && item.episode !== null ? `S${item.season} E${item.episode}` : item.year, item.duration ? `${Math.max(1, Math.round(item.duration / 60))} min` : null].filter(Boolean).join(' · ');
   const destination = short ? '/shorts' : playDirect ? '/watch/$mediaId' : '/title/$mediaId';
   const progressLabel = playDirect && (item.progress_position || 0) > 10 ? `Resume ${formatTime(item.progress_position || 0)}` : null;
   const previewStart = (item.progress_position || 0) > 5 ? item.progress_position! : 0;
@@ -65,7 +70,7 @@ export function MediaCard({item, compact=false, short=false, playDirect=false, p
   };
   const goToDetails = () => void navigate({to:'/title/$mediaId',params:{mediaId:String(item.id)}});
   return (
-    <Link to={destination} params={short ? undefined : {mediaId:String(item.id)}} aria-label={progressLabel ? `${progressLabel}: ${item.title}` : undefined} className={`media-card ${compact?'compact':''} ${playDirect?'resume-card ':''}${short?`shorts-card ${isPortrait?'art-portrait':'art-landscape'}`:''}${preview?' previewing':''}`} preload="intent"
+    <Link to={destination} params={short ? undefined : {mediaId:String(item.id)}} aria-label={progressLabel ? `${progressLabel}: ${item.title}` : undefined} className={`media-card ${isPoster?'art-poster':''} ${compact?'compact':''} ${playDirect?'resume-card ':''}${short?`shorts-card ${isPortrait?'art-portrait':'art-landscape'}`:''}${preview?' previewing':''}`} preload="intent"
       onMouseEnter={HOVER_CAPABLE && onHoverChange ? ()=>onHoverChange(true) : undefined}
       onMouseLeave={HOVER_CAPABLE && onHoverChange ? ()=>onHoverChange(false) : undefined}
       onContextMenu={(event) => { event.preventDefault(); openMenu(event.clientX, event.clientY); }}
@@ -75,7 +80,7 @@ export function MediaCard({item, compact=false, short=false, playDirect=false, p
       onPointerCancel={clearLongPress}
       onClick={handleClick}>
       <div className="media-card-art">
-        <img src={artwork(item, item.backdrop_path ? 'backdrop' : item.poster_path ? 'poster' : 'thumbnail')} alt="" loading="lazy" decoding="async" onError={(e)=>{const image=e.currentTarget;if(item.poster_path&&!image.dataset.fallback){image.dataset.fallback='1';image.src=artwork(item,'poster');return;}if(image.dataset.fallback==='1'){image.dataset.fallback='2';image.src=artwork(item,'thumbnail');return;}image.style.display='none';}}/>
+        <img key={imageSources.join('|')} src={imageSources[0]} alt="" loading="lazy" decoding="async" onLoad={(e)=>{const image=e.currentTarget;if(image.naturalWidth>1||image.naturalHeight>1) image.dataset.loaded='true';}} onError={(e)=>{const image=e.currentTarget;delete image.dataset.loaded;const next=Number(image.dataset.fallbackIndex || 0)+1;if(next<imageSources.length){image.dataset.fallbackIndex=String(next);image.src=imageSources[next];}else image.style.display='none';}}/>
         <div className="media-card-fallback"><Play weight="fill"/></div>
         <div className="media-card-play"><span><Play weight="fill"/></span></div>
         {preview && <PreviewPlayer item={item} start={previewStart} />}
@@ -83,7 +88,7 @@ export function MediaCard({item, compact=false, short=false, playDirect=false, p
       </div>
       <div className="media-card-copy">
         <strong title={item.title}>{item.title}</strong>
-        <span>{progressLabel || item.year || (item.kind === 'series' && item.season ? `S${item.season} · E${item.episode}` : item.container?.toUpperCase() || 'Video')}</span>
+        {(progressLabel || details) && <span>{progressLabel || details}</span>}
       </div>
       {menuPosition && <MediaContextMenu
         item={{...item, liked: favorite ? 1 : 0}}

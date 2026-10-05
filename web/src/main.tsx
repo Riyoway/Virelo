@@ -6,6 +6,7 @@ import '@fontsource-variable/inter';
 import { SplashScreen } from './components/SplashScreen';
 import { router } from './router';
 import './styles.css';
+import './streaming-ui.css';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
