@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Remove persistent Shorts play/pause controls, move sound above Like, shuffle each Shorts visit and preserve clip alignment on rotation.
+- Respect pause/play intent during quality and audio preparation, cancel stale source restores, and keep preparation overlays off paused playback.
+- Add per-video metadata reset that preserves files, thumbnails, favorites and watch progress without automatic rematching.
+- Contain field focus, flatten native seek tracks, and fix context-menu event propagation and keyboard focus.
+- Keep queue selection stable on refresh and add repeatable browser/FFmpeg regression audits.
+
 - Start playable videos directly on LAN connections instead of waiting for Auto quality renditions; prepare adaptive HLS only after sustained buffering.
 - Keep preparation indicators off already-playing video and retain the session's bandwidth estimate between adaptive videos.
 - Start compatible HLS from completed segments while conversion continues, copying H.264 video when only audio needs conversion.
