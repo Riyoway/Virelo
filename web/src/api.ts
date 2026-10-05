@@ -30,7 +30,7 @@ export const api = {
   home: () => request<HomeData>('/api/home'),
   media: (params: Record<string,string|number|undefined> = {}) => request<MediaItem[]>(withQuery('/api/media', params)),
   mediaById: (id: number) => request<MediaItem>(`/api/media/${id}`),
-  shorts: (params: {limit?:number;offset?:number} = {}) => request<ShortsFeed>(withQuery('/api/shorts', params)),
+  shorts: (params: {limit?:number;offset?:number;seed?:number} = {}) => request<ShortsFeed>(withQuery('/api/shorts', params)),
   setLike: (id: number, liked: boolean) => request<{ok:boolean;liked:boolean}>(`/api/media/${id}/like`, { method: 'POST', body: JSON.stringify({ liked }) }),
   folders: () => request<FolderEntry[]>('/api/folders'),
   libraries: () => request<Library[]>('/api/libraries'),
@@ -40,6 +40,7 @@ export const api = {
   saveSettings: (settings: Partial<Settings>) => request<Settings>('/api/settings', { method: 'POST', body: JSON.stringify(settings) }),
   startScan: () => request<{started:boolean;status:ScanStatus}>('/api/scan', { method: 'POST' }),
   scanStatus: () => request<ScanStatus>('/api/scan/status'),
+  clearMetadata: (id:number) => request<MediaItem>(`/api/media/${id}/metadata`, { method:'DELETE' }),
   refreshMetadata: (id:number) => request<MediaItem>(`/api/media/${id}/metadata/refresh`, { method:'POST' }),
   playbackInfo: (id:number) => request<PlaybackInfo>(`/api/media/${id}/playback`),
   startTranscode: (id:number,audioStream?:number) => request<{status:string;error?:string;playlist:string;bufferedUntil?:number;complete?:boolean}>(`/api/media/${id}/transcode/start`, {method:'POST',body:JSON.stringify(audioStream===undefined?{}:{audioStream})}),
@@ -55,5 +56,5 @@ export const api = {
 };
 
 export function artwork(item: MediaItem, kind: 'poster'|'backdrop'|'thumbnail' = 'thumbnail') {
-  return `/api/media/${item.id}/artwork/${kind}`;
+  return `/api/media/${item.id}/artwork/${kind}?v=${item.metadata_revision ?? 0}`;
 }

@@ -134,7 +134,7 @@ async function refreshCinemetaMetadata(db: VireloDB, dataDir: string, media: Med
     backdrop_path: backdropPath,
     external_id: `cinemeta:${type}:${match.id}${episode ? `:s${media.season}:e${media.episode}` : ''}`,
     year: firstYear(date) ?? media.year
-  });
+  }, media.metadata_revision ?? 0);
   return db.getMedia(media.id);
 }
 
@@ -187,15 +187,16 @@ async function refreshTmdbMetadata(db: VireloDB, dataDir: string, media: MediaRe
     backdrop_path: backdropPath,
     external_id: externalId,
     year: firstYear(date) ?? media.year
-  });
+  }, media.metadata_revision ?? 0);
   return db.getMedia(media.id);
 }
 
-export async function refreshMetadata(db: VireloDB, dataDir: string, mediaId: number) {
+export async function refreshMetadata(db: VireloDB, dataDir: string, mediaId: number, manual = true) {
   const settings = db.getSettings();
   if (!settings.externalMetadataEnabled) throw new Error('Online metadata is disabled. Enable it in Settings first.');
   const media = db.getMedia(mediaId);
   if (!media) throw new Error('Media not found.');
+  if (!manual && media.metadata_blocked) return media;
   const tmdbApiKey = settings.tmdbApiKey || process.env.VIRELO_TMDB_API_KEY?.trim();
   return tmdbApiKey
     ? refreshTmdbMetadata(db, dataDir, media, tmdbApiKey)
@@ -210,7 +211,7 @@ export async function refreshMissingMetadata(db: VireloDB, dataDir: string, onPr
   let failed = 0;
   for (let index = 0; index < candidates.length; index++) {
     try {
-      await refreshMetadata(db, dataDir, candidates[index].id);
+      await refreshMetadata(db, dataDir, candidates[index].id, false);
       updated++;
     } catch {
       failed++;

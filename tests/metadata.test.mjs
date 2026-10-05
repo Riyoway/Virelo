@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { VireloDB } from '../dist/db.js';
 import { refreshMetadata } from '../dist/metadata.js';
+import { parseMediaName } from '../dist/scanner.js';
 
 test('matches free metadata and replaces generated artwork for an episode', async () => {
   const root = await mkdtemp(join(tmpdir(), 'virelo-metadata-test-'));
@@ -76,6 +77,24 @@ test('matches free metadata and replaces generated artwork for an episode', asyn
     assert.match(updated?.backdrop_path || '', /cinemeta-tt0903747-s1-e1-backdrop\.jpg$/);
     await access(updated.poster_path);
     await access(updated.backdrop_path);
+    db.setLike(media.id, true);
+    db.setProgress(media.id, 123, 3600);
+    const staleRevision = updated.metadata_revision;
+    const cleared = db.clearExternalMetadata(media.id, parseMediaName(media.path));
+    assert.equal(cleared.title, 'Breaking Bad · S01E01');
+    for (const field of ['overview','genres','poster_path','backdrop_path','external_id']) assert.equal(cleared[field], null);
+    assert.equal(cleared.thumbnail_path, media.thumbnail_path);
+    assert.equal(cleared.progress_position, 123);
+    assert.equal(cleared.liked, 1);
+    assert.equal(cleared.metadata_blocked, 1);
+    assert.equal(db.listMetadataCandidates(500, true).length, 0);
+    // An in-flight lookup from before Clear must not replace the user's reset.
+    db.updateExternalMetadata(media.id, {title:'Stale match', external_id:'stale'}, staleRevision);
+    assert.equal(db.getMedia(media.id).external_id, null);
+    // Manual matching opts the file back in; scanning alone does not.
+    const rematched = await refreshMetadata(db, root, media.id);
+    assert.equal(rematched.metadata_blocked, 0);
+    assert.equal(rematched.title, 'Breaking Bad · Pilot');
   } finally {
     if (db) db.close();
     globalThis.fetch = originalFetch;

@@ -38,6 +38,8 @@ export interface MediaRecord {
   overview: string | null;
   genres: string | null;
   external_id: string | null;
+  metadata_blocked?: number;
+  metadata_revision?: number;
   added_at: number;
   updated_at: number;
   progress_position?: number;
