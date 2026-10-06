@@ -66,12 +66,12 @@ export function MediaCard({item, compact=false, short=false, playDirect=false, p
     longPressTriggered.current = false;
   };
   const goToPlayback = () => {
-    if (short) void navigate({to:'/shorts'});
+    if (short) void navigate({to:'/shorts',search:{startId:item.id}});
     else void navigate({to:'/watch/$mediaId',params:{mediaId:String(item.id)}});
   };
   const goToDetails = () => void navigate({to:'/title/$mediaId',params:{mediaId:String(item.id)}});
   return (
-    <Link ref={cardRef} to={destination} params={short ? undefined : {mediaId:String(item.id)}} aria-label={progressLabel ? `${progressLabel}: ${item.title}` : undefined} className={`media-card ${isPoster?'art-poster':''} ${compact?'compact':''} ${playDirect?'resume-card ':''}${short?`shorts-card ${isPortrait?'art-portrait':'art-landscape'}`:''}${preview?' previewing':''}`} preload="intent"
+    <Link ref={cardRef} to={destination} params={short ? undefined : {mediaId:String(item.id)}} search={short ? {startId:item.id} : undefined} aria-label={progressLabel ? `${progressLabel}: ${item.title}` : undefined} className={`media-card ${isPoster?'art-poster':''} ${compact?'compact':''} ${playDirect?'resume-card ':''}${short?`shorts-card ${isPortrait?'art-portrait':'art-landscape'}`:''}${preview?' previewing':''}`} preload="intent"
       onMouseEnter={HOVER_CAPABLE && onHoverChange ? ()=>onHoverChange(true) : undefined}
       onMouseLeave={HOVER_CAPABLE && onHoverChange ? ()=>onHoverChange(false) : undefined}
       onContextMenu={(event) => { event.preventDefault(); openMenu(event.clientX, event.clientY); }}

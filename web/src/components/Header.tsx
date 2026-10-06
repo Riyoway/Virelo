@@ -32,7 +32,7 @@ export function Header() {
         <nav className="desktop-nav" aria-label="Main navigation">
           <Link to="/" activeOptions={{exact:true}} activeProps={{className:'active'}}>Home</Link>
           <Link to="/library" activeProps={{className:'active'}}>Library</Link>
-          <Link to="/shorts" activeProps={{className:'active'}}>Shorts</Link>
+          <Link to="/shorts" search={{}} activeProps={{className:'active'}}>Shorts</Link>
         </nav>
         <div className="topbar-actions">
           <div className={`header-search-shell ${searchOpen ? 'open' : ''}`}>

@@ -4,6 +4,7 @@ import { Header } from './components/Header';
 import { MobileNav } from './components/MobileNav';
 import { NotFoundView } from './views/NotFoundView';
 import type { SortKey } from './types';
+import { validateShortsSearch } from './utils/shorts-navigation';
 
 const HomeView = lazy(async () => ({ default: (await import('./views/HomeView')).HomeView }));
 const LibraryView = lazy(async () => ({ default: (await import('./views/LibraryView')).LibraryView }));
@@ -53,7 +54,7 @@ const libraryRoute = createRoute({ getParentRoute:()=>rootRoute, path:'/library'
 const settingsRoute = createRoute({ getParentRoute:()=>rootRoute, path:'/settings', component:SettingsRouteView });
 const watchRoute = createRoute({ getParentRoute:()=>rootRoute, path:'/watch/$mediaId', component:WatchRouteView, validateSearch: validateWatchSearch });
 const detailRoute = createRoute({ getParentRoute:()=>rootRoute, path:'/title/$mediaId', component:DetailRouteView });
-const shortsRoute = createRoute({ getParentRoute:()=>rootRoute, path:'/shorts', component:ShortsRouteView });
+const shortsRoute = createRoute({ getParentRoute:()=>rootRoute, path:'/shorts', component:ShortsRouteView, validateSearch:validateShortsSearch });
 const routeTree = rootRoute.addChildren([indexRoute, libraryRoute, settingsRoute, watchRoute, detailRoute, shortsRoute]);
 export const router = createRouter({ routeTree, defaultPreload: 'intent', scrollRestoration: true });
 declare module '@tanstack/react-router' { interface Register { router: typeof router } }

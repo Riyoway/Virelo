@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { useNavigate } from '@tanstack/react-router';
+import { useNavigate, useSearch } from '@tanstack/react-router';
 import { ArrowDown, ArrowLeft, Heart, PictureInPicture, SpeakerHigh, SpeakerSlash, SpinnerGap } from '@phosphor-icons/react';
 import { api } from '../api';
 import { playVideo } from '../utils/media-playback';
@@ -13,6 +13,11 @@ const PAGE_SIZE = 40;
 const RENDER_WINDOW = 2;
 
 export function ShortsView() {
+  const { startId } = useSearch({ from: '/shorts' });
+  return <ShortsFeedView key={startId ?? 'random'} startId={startId} />;
+}
+
+function ShortsFeedView({ startId }: { startId?: number }) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const activeIndexRef = useRef(0);
@@ -22,8 +27,8 @@ export function ShortsView() {
   const [seed] = useState(() => crypto.getRandomValues(new Uint32Array(1))[0]);
 
   const query = useInfiniteQuery({
-    queryKey: ['shorts', seed],
-    queryFn: ({ pageParam }) => api.shorts({ limit: PAGE_SIZE, offset: pageParam, seed }),
+    queryKey: ['shorts', seed, startId],
+    queryFn: ({ pageParam }) => api.shorts({ limit: PAGE_SIZE, offset: pageParam, seed, startId }),
     initialPageParam: 0,
     gcTime: 0,
     getNextPageParam: (page, all) => {
@@ -83,6 +88,10 @@ export function ShortsView() {
 
   if (query.isError && items.length === 0) return <div className="shorts-empty"><p>Shorts could not be loaded.</p><button onClick={() => void query.refetch()}>Try again</button></div>;
   if (query.isLoading) return <div className="shorts-loading skeleton" />;
+  if (startId !== undefined && query.data && items[0]?.id !== startId) {
+    return <div className="shorts-empty"><p>This Short is no longer available in your Shorts feed.</p>
+      <button onClick={() => history.back()}>Back</button></div>;
+  }
   if (!query.isFetching && total === 0 && items.length === 0) {
     return (
       <div className="shorts-empty">
@@ -373,7 +382,7 @@ function ShortsClip({ item, active, onSkip, pipOn, onPip }: { item: ShortItem; a
         returnFocus={videoRef.current}
         favorite={liked}
         onFavorite={toggleLike}
-        onPlay={() => void navigate({to:'/shorts'})}
+        onPlay={() => { wantsPlayback.current = true; resumeBackground(); }}
         onDetails={() => void navigate({to:'/title/$mediaId',params:{mediaId:String(item.id)}})}
         onClose={() => setMenuPosition(null)}
       />}

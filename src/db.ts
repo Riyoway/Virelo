@@ -318,11 +318,12 @@ export class VireloDB {
     `).all(...visible.params, includeMissingArtwork ? 1 : 0, safeLimit) as unknown as MediaRecord[];
   }
 
-  getShorts(options: { limit?: number; offset?: number; seed?: number; includeLandscapes?: boolean } = {}): ShortsFeed {
+  getShorts(options: { limit?: number; offset?: number; seed?: number; startId?: number; includeLandscapes?: boolean } = {}): ShortsFeed {
     const requestedLimit = Number.isFinite(options.limit) ? Number(options.limit) : 50;
     const requestedOffset = Number.isFinite(options.offset) ? Number(options.offset) : 0;
     const limit = Math.min(Math.max(Math.trunc(requestedLimit), 1), 500);
     const offset = Math.max(Math.trunc(requestedOffset), 0);
+    const startId = Number.isSafeInteger(options.startId) && Number(options.startId) > 0 ? Number(options.startId) : 0;
     const dims = '(m.width IS NOT NULL AND m.height IS NOT NULL AND m.width>0 AND m.height>0)';
     const cond = options.includeLandscapes ? dims : `${dims} AND m.height>m.width`;
     const visible = this.visibleIdClause();
@@ -330,8 +331,8 @@ export class VireloDB {
       SELECT m.*,p.position AS progress_position,p.duration AS progress_duration,p.completed AS progress_completed,(l.media_id IS NOT NULL) AS liked
       FROM media m LEFT JOIN progress p ON p.media_id=m.id LEFT JOIN likes l ON l.media_id=m.id
       WHERE ${visible.sql} AND ${cond}
-      ORDER BY shorts_rank(m.id,?),m.id LIMIT ? OFFSET ?
-    `).all(...visible.params, Number.isFinite(options.seed) ? Number(options.seed) >>> 0 : 0, limit, offset) as unknown as ShortsItem[];
+      ORDER BY (m.id=?) DESC,shorts_rank(m.id,?),m.id LIMIT ? OFFSET ?
+    `).all(...visible.params, startId, Number.isFinite(options.seed) ? Number(options.seed) >>> 0 : 0, limit, offset) as unknown as ShortsItem[];
     const total = Number((this.db.prepare(`SELECT COUNT(*) c FROM media m WHERE ${visible.sql} AND ${cond}`).get(...visible.params) as {c:number}).c);
     return { items, total };
   }

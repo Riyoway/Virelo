@@ -30,7 +30,7 @@ export const api = {
   home: () => request<HomeData>('/api/home'),
   media: (params: Record<string,string|number|undefined> = {}) => request<MediaItem[]>(withQuery('/api/media', params)),
   mediaById: (id: number) => request<MediaItem>(`/api/media/${id}`),
-  shorts: (params: {limit?:number;offset?:number;seed?:number} = {}) => request<ShortsFeed>(withQuery('/api/shorts', params)),
+  shorts: (params: {limit?:number;offset?:number;seed?:number;startId?:number} = {}) => request<ShortsFeed>(withQuery('/api/shorts', params)),
   setLike: (id: number, liked: boolean) => request<{ok:boolean;liked:boolean}>(`/api/media/${id}/like`, { method: 'POST', body: JSON.stringify({ liked }) }),
   folders: () => request<FolderEntry[]>('/api/folders'),
   libraries: () => request<Library[]>('/api/libraries'),

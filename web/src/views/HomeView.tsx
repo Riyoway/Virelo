@@ -92,7 +92,7 @@ export function HomeView() {
       {filter!=='movie'&&<MediaRow title="Your series" items={series} poster seriesTitles/>}
       {genreShelves.map((genre,i)=><MediaRow key={genre.name} title={genre.name} items={discoveryShelves[i+3]} poster/>)}
       {filter==='all'&&shorts.data&&shorts.data.total>0&&<MediaRow title="Shorts" items={shorts.data.items} short
-        action={<Link to="/shorts" className="row-link">View all</Link>}/>}
+        action={<Link to="/shorts" search={{}} className="row-link">View all</Link>}/>}
       {filter!=='series'&&<MediaRow title="Movies" items={movieDiscovery} poster/>}
       {filter!=='all'&&!(filter==='movie'?data.movies:data.series).length&&<div className="home-category-empty"><h2>No {filter==='movie'?'movies':'series'} yet</h2>
         <p>Browse your library or add another folder in Settings.</p><Link to="/library">Browse library</Link></div>}

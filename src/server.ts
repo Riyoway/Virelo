@@ -305,12 +305,13 @@ export async function createVireloServer(config: RuntimeConfig) {
     }
   });
 
-  app.get<{ Querystring: { limit?: string; offset?: string; seed?: string } }>('/api/shorts', async (request) => {
+  app.get<{ Querystring: { limit?: string; offset?: string; seed?: string; startId?: string } }>('/api/shorts', async (request) => {
     const q = request.query;
     return db.getShorts({
       limit: q.limit ? Number(q.limit) : 50,
       offset: q.offset ? Number(q.offset) : 0,
       seed: q.seed ? Number(q.seed) : 0,
+      startId: q.startId ? Number(q.startId) : undefined,
       includeLandscapes: db.getSettings().shortsIncludeLandscapes
     });
   });

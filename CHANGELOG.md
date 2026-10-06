@@ -4,6 +4,8 @@
 
 ## 0.3.0 — 2026-10-06
 
+- Start Shorts card playback with the selected video, preserving randomized discovery afterwards and stable pagination; opening Shorts navigation still starts a fresh random feed.
+
 - Improve media-row scrolling in both apps by cancelling wheel easing on button, keyboard and touch takeover, reversing immediately, and retaining native mobile swipes.
 
 - Avoid repeating Recently added titles in the Home Movies shelf; show older library titles or omit the redundant row in small libraries.
