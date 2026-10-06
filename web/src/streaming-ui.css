@@ -23,6 +23,11 @@
 .app-shell .desktop-nav a::after { display:none; }
 .app-shell .desktop-nav a.active { font-weight:650; }
 .app-shell .desktop-nav a:focus-visible { outline:2px solid var(--color-focus); outline-offset:4px; }
+.app-shell .home-header { background:linear-gradient(180deg,rgba(13,13,15,.95),rgba(13,13,15,.55) 65%,transparent); }
+.home-header-category { display:flex; align-items:center; min-height:44px; padding:8px 0; border:0; background:none; color:var(--text-muted); font:inherit; cursor:pointer; }
+.home-header-category[aria-pressed="true"] { color:var(--text); font-weight:650; }
+.home-header-category:focus-visible { outline:2px solid var(--color-focus); outline-offset:4px; }
+@media (hover:hover) and (pointer:fine) { .home-header-category:hover { color:var(--text); } }
 .app-shell .header-search-shell.open { border-radius:4px; }
 .app-shell .header-search-shell:focus-within { outline:none; box-shadow:inset 0 0 0 2px var(--color-focus); }
 .app-shell .header-search-toggle:focus-visible { outline:none!important; box-shadow:inset 0 0 0 2px var(--color-focus)!important; }

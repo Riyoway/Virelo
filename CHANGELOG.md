@@ -4,6 +4,8 @@
 
 ## 0.3.0 — 2026-10-06
 
+- Integrate Home categories into desktop navigation, restore compact featured-title dots and automatic rotation with hover/focus, hidden-tab, visibility and reduced-motion safeguards.
+
 - Start Shorts card playback with the selected video, preserving randomized discovery afterwards and stable pagination; opening Shorts navigation still starts a fresh random feed.
 
 - Improve media-row scrolling in both apps by cancelling wheel easing on button, keyboard and touch takeover, reversing immediately, and retaining native mobile swipes.

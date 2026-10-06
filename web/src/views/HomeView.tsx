@@ -1,16 +1,17 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from '@heroui/react';
-import { Play, Info, CaretLeft, CaretRight } from '@phosphor-icons/react';
+import { Play, Pause, Info } from '@phosphor-icons/react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { api, artwork } from '../api';
 import { MediaRow } from '../components/MediaRow';
 import { EmptyState } from '../components/EmptyState';
 import { distinctDiscoveryShelves, mediaGenres, moviesOutsideRecent } from '../utils/home-catalog';
+import { useUIStore, type HomeFilter } from '../store';
+import { useFeaturedRotation } from '../hooks/useFeaturedRotation';
 import type { MediaItem } from '../types';
 import '../home.css';
 
-type HomeFilter='all'|'movie'|'series';
 const filters=[['all','For you'],['movie','Movies'],['series','Series']] as const;
 function featuredTitles(items:MediaItem[]) {
   const seen=new Set<string>();
@@ -21,20 +22,28 @@ function featuredTitles(items:MediaItem[]) {
   }).sort((a,b)=>Number(Boolean(b.backdrop_path||b.thumbnail_path))-Number(Boolean(a.backdrop_path||a.thumbnail_path))).slice(0,5);
 }
 export function HomeView() {
+  const filter=useUIStore(s=>s.homeFilter);
+  return <FilteredHome key={filter} filter={filter}/>;
+}
+function FilteredHome({filter}:{filter:HomeFilter}) {
   const navigate=useNavigate();
-  const [filter,setFilter]=useState<HomeFilter>('all');
+  const setFilter=useUIStore(s=>s.setHomeFilter);
   const [heroIndex,setHeroIndex]=useState(0);
+  const [animate,setAnimate]=useState(false);
+  const heroRef=useRef<HTMLElement>(null);
   const [shortsSeed]=useState(()=>Math.floor(Date.now()/86400000));
   const home=useQuery({queryKey:['home'],queryFn:api.home,refetchInterval:q=>q.state.data?.total===0?2000:30000});
   const shorts=useQuery({queryKey:['shorts','row',shortsSeed],queryFn:()=>api.shorts({limit:12,seed:shortsSeed}),staleTime:60000});
   const data=home.data;
   const heroPool=useMemo(()=>!data?[]:featuredTitles(filter==='movie'?data.movies:filter==='series'?data.series:
     [...(data.unwatched??[]),...data.movies,...data.series,...data.recent]),[data,filter]);
+  const index=heroIndex%Math.max(1,heroPool.length),hero=heroPool[index];
+  const advance=useCallback(()=>{setAnimate(true);setHeroIndex(current=>(current+1)%heroPool.length);},[heroPool.length]);
+  const rotation=useFeaturedRotation(heroRef,heroPool.length,hero?.id,advance);
   const pick=(items:MediaItem[]|undefined)=>(items??[]).filter(item=>filter==='all'||item.kind===filter);
   if(home.isLoading)return <HomeSkeleton/>;
   if(home.isError&&!data)return <div className="home-load-error"><h1>Couldn’t load your library</h1><p>Try again to reconnect to your videos.</p><Button onPress={()=>void home.refetch()}>Try again</Button></div>;
   if(!data||data.total===0)return <EmptyState/>;
-  const index=heroIndex%Math.max(1,heroPool.length),hero=heroPool[index];
   const genres=hero?mediaGenres(hero.genres).slice(0,2):[];
   const metadata=hero?[hero.kind==='series'?'Series':hero.kind==='movie'?'Movie':null,hero.year,
     hero.kind==='series'&&hero.season!==null&&hero.episode!==null?'S'+hero.season+' · E'+hero.episode:
@@ -51,12 +60,11 @@ export function HomeView() {
   const [unwatched,quickWatches,series]=discoveryShelves;
   const movieDiscovery=discoveryShelves[discoveryShelves.length-1];
   return <div className="home-view">
-    <nav className="home-browse" aria-label="Home categories">
+    <nav className="home-mobile-categories" aria-label="Home categories">
       <div className="home-filter">{filters.map(([value,label])=><button key={value} aria-pressed={filter===value}
-        onClick={()=>{setFilter(value);setHeroIndex(0);}}>{label}</button>)}</div>
-      <Link to="/library" className="home-library-link">Browse library</Link>
+        onClick={()=>setFilter(value)}>{label}</button>)}</div>
     </nav>
-    {hero?<section className={'hero-banner home-feature'+(hero.backdrop_path||hero.thumbnail_path||hero.poster_path?'':' home-feature-text')} aria-label="Featured titles">
+    {hero?<section ref={heroRef} className={'hero-banner home-feature'+(hero.backdrop_path||hero.thumbnail_path||hero.poster_path?'':' home-feature-text')} aria-label="Featured titles" aria-roledescription="carousel" data-animate={animate}>
       <FeaturedArtwork key={hero.id+':'+hero.backdrop_path+':'+hero.thumbnail_path+':'+hero.poster_path} item={hero}/>
       <div className="hero-vignette"/>
       <div className="hero-content">
@@ -71,14 +79,11 @@ export function HomeView() {
         </div>
       </div>
       {heroPool.length>1&&<div className="home-feature-picker">
-        <div className="home-feature-navigation"><button aria-label="Previous featured title" onClick={()=>setHeroIndex((index+heroPool.length-1)%heroPool.length)}><CaretLeft/></button>
-          <span>{index+1} / {heroPool.length}</span>
-          <button aria-label="Next featured title" onClick={()=>setHeroIndex((index+1)%heroPool.length)}><CaretRight/></button>
-        </div>
-        <div className="home-feature-previews">{heroPool.map((item,i)=><button key={item.id} aria-pressed={i===index}
-          aria-label={'Feature '+(item.series_title||item.title)} onClick={()=>setHeroIndex(i)}>
-          <img src={artwork(item,item.backdrop_path?'backdrop':'thumbnail')} alt="" loading="lazy" onError={e=>{e.currentTarget.style.visibility='hidden';}}/>
-          <span>{item.series_title||item.title}</span>
+        {!rotation.reducedMotion&&<button className="home-rotation-toggle" aria-label={rotation.paused?'Resume banner rotation':'Pause banner rotation'}
+          onClick={()=>rotation.setPaused(current=>!current)}>{rotation.paused?<Play weight="fill"/>:<Pause weight="fill"/>}</button>}
+        <div className="home-feature-dots" role="group" aria-label="Choose a featured title">{heroPool.map((item,i)=><button key={item.id} aria-pressed={i===index}
+          aria-label={'Show featured title '+(i+1)+': '+(item.series_title||item.title)} onClick={event=>{setAnimate(event.detail>0);setHeroIndex(i);}}>
+          <span/>
         </button>)}</div>
       </div>}
     </section>:<header className="home-simple-heading"><h1>{filter==='series'?'Series':filter==='movie'?'Movies':'Your library'}</h1></header>}

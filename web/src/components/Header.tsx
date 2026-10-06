@@ -1,11 +1,15 @@
 import { useEffect, useRef } from 'react';
-import { Link, useNavigate } from '@tanstack/react-router';
+import { Link, useLocation, useNavigate } from '@tanstack/react-router';
 import { Button, Input } from '@heroui/react';
 import { MagnifyingGlass, Gear } from '@phosphor-icons/react';
 import { useUIStore } from '../store';
 
 export function Header() {
   const navigate = useNavigate();
+  const pathname = useLocation({select:location=>location.pathname});
+  const isHome = pathname === '/';
+  const homeFilter = useUIStore(s=>s.homeFilter);
+  const setHomeFilter = useUIStore(s=>s.setHomeFilter);
   const search = useUIStore((s)=>s.search);
   const setSearch = useUIStore((s)=>s.setSearch);
   const searchOpen = useUIStore((s)=>s.mobileSearchOpen);
@@ -23,14 +27,16 @@ export function Header() {
     if (nextOpen) void navigate({to:'/library'});
   };
   return (
-    <header className="topbar">
+    <header className={'topbar'+(isHome?' home-header':'')}>
       <div className="topbar-inner">
-        <Link to="/" className="brand" aria-label="Virelo home">
+        <Link to="/" className="brand" aria-label="Virelo home" onClick={()=>setHomeFilter('all')}>
           <span className="brand-mark"><img src="/virelo-icon.png" alt="" /></span>
           <span className="brand-name">Virelo</span>
         </Link>
         <nav className="desktop-nav" aria-label="Main navigation">
-          <Link to="/" activeOptions={{exact:true}} activeProps={{className:'active'}}>Home</Link>
+          <Link to="/" activeOptions={{exact:true}} activeProps={homeFilter==='all'?{className:'active'}:{}} onClick={()=>setHomeFilter('all')}>Home</Link>
+          {isHome&&<><button className="home-header-category" aria-pressed={homeFilter==='movie'} onClick={()=>setHomeFilter('movie')}>Movies</button>
+            <button className="home-header-category" aria-pressed={homeFilter==='series'} onClick={()=>setHomeFilter('series')}>Series</button></>}
           <Link to="/library" activeProps={{className:'active'}}>Library</Link>
           <Link to="/shorts" search={{}} activeProps={{className:'active'}}>Shorts</Link>
         </nav>
