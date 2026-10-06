@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.3.0 — 2026-10-06
+
+- Improve media-row scrolling in both apps by cancelling wheel easing on button, keyboard and touch takeover, reversing immediately, and retaining native mobile swipes.
+
+- Avoid repeating Recently added titles in the Home Movies shelf; show older library titles or omit the redundant row in small libraries.
+
+- Preserve playback intent across browser-tab suspension; keep separate soundtracks running, catch video up on return, respect explicit/media-key pauses, and recover active Shorts without restarting inactive clips.
+
+- Split player quality, audio and subtitles into independent toolbar controls with single-purpose, viewport-safe menus, keyboard navigation and fullscreen support.
+
+- Persist manual quality ceilings across videos and reloads in both apps; preserve lower-source playback, stop rather than increase quality on conversion failures, and keep HLS initial loads and portrait streams within the saved limit.
+
+- Enrich Home with next episodes, unwatched discoveries, short movies and metadata-driven genre shelves; group series, filter Movies/Series and browse featured titles without automatic rotation.
+- Resolve only displayed Home thumbnails in the browser-only app and add responsive, keyboard and shelf-curation regression coverage.
 - Remove persistent Shorts play/pause controls, move sound above Like, shuffle each Shorts visit and preserve clip alignment on rotation.
 - Respect pause/play intent during quality and audio preparation, cancel stale source restores, and keep preparation overlays off paused playback.
 - Add a settings-level bulk metadata reset across all libraries, preserving files, thumbnails, favorites and watch progress without automatic rematching.
