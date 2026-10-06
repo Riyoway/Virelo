@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { access, mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { access, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { VireloDB } from '../dist/db.js';
-import { parseMediaName } from '../dist/scanner.js';
+import { parseMediaName, scanLibrary } from '../dist/scanner.js';
+import { playbackQualities } from '../dist/ffmpeg.js';
 
 test('parses movie and episode names', () => {
   assert.deepEqual(parseMediaName('/Movies/Blade.Runner.1982.1080p.mkv'), {
@@ -16,6 +17,13 @@ test('parses movie and episode names', () => {
   assert.equal(episode.season, 1);
   assert.equal(episode.episode, 3);
   assert.equal(episode.year, 2026);
+});
+
+test('builds an adaptive quality ladder without upscaling the source', () => {
+  assert.deepEqual(playbackQualities(1920, 1080).map((quality) => quality.label), ['1080p', '720p', '480p', '360p']);
+  assert.deepEqual(playbackQualities(3840, 2160).map((quality) => quality.label), ['4K', '1440p', '1080p', '720p', '480p']);
+  assert.deepEqual(playbackQualities(1080, 1920).map((quality) => quality.label), ['1080p', '720p', '480p', '360p']);
+  assert.deepEqual(playbackQualities(640, 360).map((quality) => quality.label), ['360p']);
 });
 
 test('persists local library and watch progress in sqlite', async () => {
@@ -36,6 +44,28 @@ test('persists local library and watch progress in sqlite', async () => {
     const loaded = db.getMedia(item.id);
     assert.equal(loaded?.progress_position, 42);
     assert.equal(loaded?.progress_completed, 0);
+    db.close();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('moves unchanged media into a more specific library when it is rescanned there', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'virelo-library-move-'));
+  const mediaRoot = join(dir, 'media');
+  const showRoot = join(mediaRoot, 'Show');
+  try {
+    await Promise.all([join(dir,'thumbnails'),join(dir,'artwork'),join(dir,'cache'),showRoot].map((path) => mkdir(path, { recursive: true })));
+    const videoPath = join(showRoot, 'Example.S01E01.mp4');
+    await writeFile(videoPath, 'not-a-real-video');
+    const db = new VireloDB(dir);
+    const parent = db.addLibrary(mediaRoot, 'Media');
+    const child = db.addLibrary(showRoot, 'Show');
+    const status = () => ({ running:true,startedAt:null,finishedAt:null,total:0,scanned:0,added:0,updated:0,skipped:0,errors:0,message:'' });
+    await scanLibrary(db, parent, dir, status());
+    assert.equal(db.getMediaByPath(videoPath)?.library_id, parent.id);
+    await scanLibrary(db, child, dir, status());
+    assert.equal(db.getMediaByPath(videoPath)?.library_id, child.id);
     db.close();
   } finally {
     await rm(dir, { recursive: true, force: true });

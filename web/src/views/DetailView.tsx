@@ -10,23 +10,24 @@ export function DetailView() {
   const id = Number(mediaId);
   const navigate = useNavigate();
   const client = useQueryClient();
-  const {data:item,isLoading} = useQuery({queryKey:['media',id],queryFn:()=>api.mediaById(id)});
+  const {data:item,isLoading,error:loadError,refetch} = useQuery({queryKey:['media',id],queryFn:()=>api.mediaById(id)});
   const {data:settings} = useQuery({queryKey:['settings'],queryFn:api.settings});
   const related = useQuery({
     queryKey:['related',item?.series_title,item?.kind],
     queryFn:()=>api.media(item?.series_title ? {search:item.series_title,limit:50} : {kind:item?.kind,limit:24}),
     enabled:Boolean(item)
   });
-  const refresh = useMutation({mutationFn:()=>api.refreshMetadata(id),onSuccess:(media)=>{client.setQueryData(['media',id],media);void client.invalidateQueries({queryKey:['home']});}});
+  const refresh = useMutation({mutationFn:()=>api.refreshMetadata(id),onSuccess:(media)=>{client.setQueryData(['media',id],media);void client.invalidateQueries({predicate:(query)=>['home','media','related','shorts','watch-queue','queue','search'].includes(String(query.queryKey[0]))});}});
+  if (loadError) return <div className="watch-empty"><h1>Video unavailable</h1><p>{loadError.message}</p><Button variant="secondary" onPress={()=>void refetch()}>Try again</Button></div>;
   if (isLoading || !item) return <div className="detail-loading skeleton"/>;
   const isPortrait = Boolean(item.width && item.height && item.height > item.width);
-  const landscapeThumb = !isPortrait && !(item.external_id && item.poster_path);
+  const landscapeThumb = !isPortrait && !item.poster_path;
   return <article className="detail-view">
-    <div className="detail-backdrop"><img src={artwork(item,item.external_id?'backdrop':'thumbnail')} alt="" onError={(e)=>{e.currentTarget.style.display='none';}}/><div/></div>
+    <div className="detail-backdrop"><img key={item.metadata_revision ?? 0} src={artwork(item,item.backdrop_path?'backdrop':item.poster_path?'poster':'thumbnail')} alt="" onError={(e)=>{e.currentTarget.style.display='none';}}/><div/></div>
     <div className="detail-wrap">
       <Button isIconOnly variant="secondary" aria-label="Back" onPress={()=>history.back()} className="detail-back"><ArrowLeft/></Button>
       <div className="detail-main">
-        <div className={`detail-poster ${landscapeThumb?'landscape-thumb':''}`}><img src={artwork(item,item.external_id?'poster':'thumbnail')} alt="" onError={(e)=>{e.currentTarget.style.display='none';}}/></div>
+        <div className={`detail-poster ${landscapeThumb?'landscape-thumb':''}`}><img key={item.metadata_revision ?? 0} src={artwork(item,item.poster_path?'poster':'thumbnail')} alt="" onError={(e)=>{e.currentTarget.style.display='none';}}/></div>
         <div className="detail-copy">
           <h1>{item.title}</h1>
           <div className="detail-meta"><span>{item.year || '—'}</span>{item.height && <span>{item.height}p</span>}{item.video_codec && <span>{item.video_codec.toUpperCase()}</span>}{item.duration && <span>{formatDuration(item.duration)}</span>}</div>

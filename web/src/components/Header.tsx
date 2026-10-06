@@ -1,20 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { Button, Input } from '@heroui/react';
-import { DownloadSimple, MagnifyingGlass, Gear } from '@phosphor-icons/react';
+import { MagnifyingGlass, Gear } from '@phosphor-icons/react';
 import { useUIStore } from '../store';
-
-type BeforeInstallPromptEvent = Event & {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
-};
-
-function isStandalonePwa() {
-  const iosStandalone = Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
-  return window.matchMedia('(display-mode: standalone)').matches
-    || window.matchMedia('(display-mode: fullscreen)').matches
-    || iosStandalone;
-}
 
 export function Header() {
   const navigate = useNavigate();
@@ -23,46 +11,6 @@ export function Header() {
   const searchOpen = useUIStore((s)=>s.mobileSearchOpen);
   const setMobileSearchOpen = useUIStore((s)=>s.setMobileSearchOpen);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
-  const [isInstalled, setIsInstalled] = useState(false);
-  const [installing, setInstalling] = useState(false);
-
-  useEffect(() => {
-    const displayMode = window.matchMedia('(display-mode: standalone)');
-    const syncInstalledState = () => setIsInstalled(isStandalonePwa());
-    const handleBeforeInstallPrompt = (event: Event) => {
-      event.preventDefault();
-      setInstallPrompt(event as BeforeInstallPromptEvent);
-      syncInstalledState();
-    };
-    const handleInstalled = () => {
-      setInstallPrompt(null);
-      setIsInstalled(true);
-    };
-
-    syncInstalledState();
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    window.addEventListener('appinstalled', handleInstalled);
-    displayMode.addEventListener('change', syncInstalledState);
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-      window.removeEventListener('appinstalled', handleInstalled);
-      displayMode.removeEventListener('change', syncInstalledState);
-    };
-  }, []);
-
-  const installApp = async () => {
-    if (!installPrompt || installing) return;
-    setInstalling(true);
-    try {
-      await installPrompt.prompt();
-      const choice = await installPrompt.userChoice;
-      setInstallPrompt(null);
-      if (choice.outcome === 'accepted') setIsInstalled(true);
-    } finally {
-      setInstalling(false);
-    }
-  };
 
   useEffect(() => {
     if (!searchOpen) return;
@@ -82,17 +30,11 @@ export function Header() {
           <span className="brand-name">Virelo</span>
         </Link>
         <nav className="desktop-nav" aria-label="Main navigation">
-          <Link to="/" activeProps={{className:'active'}}>Home</Link>
+          <Link to="/" activeOptions={{exact:true}} activeProps={{className:'active'}}>Home</Link>
           <Link to="/library" activeProps={{className:'active'}}>Library</Link>
           <Link to="/shorts" activeProps={{className:'active'}}>Shorts</Link>
         </nav>
         <div className="topbar-actions">
-          {!isInstalled && installPrompt && (
-            <Button className="pwa-install-button" variant="secondary" isDisabled={installing} onPress={() => void installApp()} aria-label="Install Virelo">
-              <DownloadSimple size={18} />
-              <span className="pwa-install-label">Install</span>
-            </Button>
-          )}
           <div className={`header-search-shell ${searchOpen ? 'open' : ''}`}>
             <div className="header-search-motion">
               <Button

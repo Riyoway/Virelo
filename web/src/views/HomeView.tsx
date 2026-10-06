@@ -42,7 +42,7 @@ export function HomeView() {
   const hero = heroPool.length ? heroPool[(heroIndex ?? 0) % heroPool.length] : undefined;
   return <div className="home-view">
     {hero && <section key={hero.id} className="hero-banner hero-swap">
-      <img className="hero-backdrop" src={artwork(hero, hero.external_id ? 'backdrop' : 'thumbnail')} alt="" onError={(e)=>{e.currentTarget.style.display='none';}}/>
+      <img className="hero-backdrop" src={artwork(hero, hero.backdrop_path ? 'backdrop' : hero.poster_path ? 'poster' : 'thumbnail')} alt="" onError={(e)=>{e.currentTarget.style.display='none';}}/>
       <div className="hero-vignette"/>
       <div className="hero-content">
         <h1>{hero.title}</h1>
@@ -66,7 +66,7 @@ export function HomeView() {
         </section>
       )}
       <MediaRow title="Recently added" items={data.recent}/>
-      <MediaRow title="Movies" items={data.movies}/>
+      <MediaRow title="Movies" items={data.movies} poster/>
       <MediaRow title="Series" items={data.series}/>
     </div>
   </div>;

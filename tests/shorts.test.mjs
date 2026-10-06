@@ -77,3 +77,19 @@ test('shorts feed reports watch progress', async () => {
     assert.equal(feed.items[0].progress_completed, 0);
   });
 });
+
+test('a seeded Shorts session is shuffled, stable across pages and unaffected by progress', async () => {
+  await withDb((db) => {
+    const library = db.addLibrary('/tmp/shorts-shuffle', 'Shorts');
+    for (let i = 0; i < 95; i++) seed(db, library, '/tmp/shorts-shuffle/'+i+'.mp4', 'Clip '+i, 720, 1280);
+    const order = (seed) => [0, 40, 80].flatMap((offset) => db.getShorts({ seed, offset, limit: 40 }).items.map((item) => item.id));
+    const first = order(12345);
+    assert.equal(first.length, 95);
+    assert.equal(new Set(first).size, 95);
+    assert.deepEqual(order(12345), first);
+    assert.notDeepEqual(order(98765), first);
+    db.setProgress(first[0], 10, 30);
+    db.setLike(first[0], true);
+    assert.deepEqual(order(12345), first);
+  });
+});

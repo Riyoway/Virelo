@@ -1,11 +1,12 @@
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import { parseMediaName } from './scanner.js';
 import type { AppSettings, FolderEntry, Library, MediaRecord, MediaKind, ShortsFeed, ShortsItem, SortKey } from './types.js';
 
 const DEFAULT_SETTINGS: AppSettings = {
-  externalMetadataEnabled: false,
-  externalImagesEnabled: false,
-  metadataProvider: 'tmdb',
+  externalMetadataEnabled: true,
+  externalImagesEnabled: true,
+  metadataProvider: 'cinemeta',
   metadataLanguage: 'ja-JP',
   tmdbApiKey: '',
   libraryWatchEnabled: true,
@@ -31,6 +32,7 @@ export class VireloDB {
     this.db = new DatabaseSync(resolve(dataDir, 'virelo.db'));
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
     this.migrate();
+    this.db.function('shorts_rank', { deterministic: true }, (id, seed) => shortsRank(Number(id), Number(seed)));
   }
 
   private migrate() {
@@ -94,6 +96,10 @@ export class VireloDB {
         FOREIGN KEY(media_id) REFERENCES media(id) ON DELETE CASCADE
       );
     `);
+    const columns = this.db.prepare('PRAGMA table_info(media)').all() as Array<{name: string}>;
+    for (const name of ['metadata_blocked', 'metadata_revision']) {
+      if (!columns.some((column) => column.name === name)) this.db.exec(`ALTER TABLE media ADD COLUMN ${name} INTEGER NOT NULL DEFAULT 0`);
+    }
     this.migrateFolderColumn();
   }
 
@@ -225,11 +231,30 @@ export class VireloDB {
       .run(data.duration ?? null,data.width ?? null,data.height ?? null,data.video_codec ?? null,data.audio_codec ?? null,data.container ?? null,data.thumbnail_path ?? null,Date.now(),id);
   }
 
-  updateExternalMetadata(id: number, data: Partial<Pick<MediaRecord,'title'|'overview'|'genres'|'poster_path'|'backdrop_path'|'external_id'|'year'>>) {
+  updateExternalMetadata(id: number, data: Partial<Pick<MediaRecord,'title'|'overview'|'genres'|'poster_path'|'backdrop_path'|'external_id'|'year'>>, expectedRevision?: number) {
     const current = this.getMedia(id);
-    if (!current) return;
-    this.db.prepare(`UPDATE media SET title=?,sort_title=?,overview=?,genres=?,poster_path=?,backdrop_path=?,external_id=?,year=?,updated_at=? WHERE id=?`)
+    if (!current || (expectedRevision !== undefined && current.metadata_revision !== expectedRevision)) return;
+    this.db.prepare(`UPDATE media SET metadata_blocked=0,metadata_revision=metadata_revision+1,title=?,sort_title=?,overview=?,genres=?,poster_path=?,backdrop_path=?,external_id=?,year=?,updated_at=? WHERE id=?`)
       .run(data.title ?? current.title,(data.title ?? current.title).toLowerCase(),data.overview ?? current.overview,data.genres ?? current.genres,data.poster_path ?? current.poster_path,data.backdrop_path ?? current.backdrop_path,data.external_id ?? current.external_id,data.year ?? current.year,Date.now(),id);
+  }
+
+  clearExternalMetadata(id: number, parsed: {title: string; year: number|null}) {
+    this.db.prepare(`UPDATE media SET title=?,sort_title=?,year=?,overview=NULL,genres=NULL,poster_path=NULL,backdrop_path=NULL,external_id=NULL,metadata_blocked=1,metadata_revision=metadata_revision+1,updated_at=? WHERE id=?`)
+      .run(parsed.title, parsed.title.toLowerCase(), parsed.year, Date.now(), id);
+    return this.getMedia(id);
+  }
+
+  clearAllExternalMetadata() {
+    const rows = this.db.prepare('SELECT id,path FROM media').all() as Array<{id:number;path:string}>;
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const row of rows) this.clearExternalMetadata(row.id, parseMediaName(row.path));
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+    return { cleared: rows.length };
   }
 
   deleteMissingForLibrary(libraryId: number, existingPaths: Set<string>) {
@@ -290,19 +315,19 @@ export class VireloDB {
   }
 
 
-  listMetadataCandidates(limit = 500): MediaRecord[] {
+  listMetadataCandidates(limit = 500, includeMissingArtwork = false): MediaRecord[] {
     const safeLimit = Math.min(Math.max(limit, 1), 5000);
     const visible = this.visibleIdClause();
     return this.db.prepare(`
       SELECT m.*,p.position AS progress_position,p.duration AS progress_duration,p.completed AS progress_completed,
         (l.media_id IS NOT NULL) AS liked
       FROM media m LEFT JOIN progress p ON p.media_id=m.id LEFT JOIN likes l ON l.media_id=m.id
-      WHERE ${visible.sql} AND m.external_id IS NULL
+      WHERE ${visible.sql} AND m.metadata_blocked=0 AND (m.external_id IS NULL OR (?=1 AND (m.poster_path IS NULL OR m.backdrop_path IS NULL)))
       ORDER BY m.added_at ASC LIMIT ?
-    `).all(...visible.params, safeLimit) as unknown as MediaRecord[];
+    `).all(...visible.params, includeMissingArtwork ? 1 : 0, safeLimit) as unknown as MediaRecord[];
   }
 
-  getShorts(options: { limit?: number; offset?: number; includeLandscapes?: boolean } = {}): ShortsFeed {
+  getShorts(options: { limit?: number; offset?: number; seed?: number; includeLandscapes?: boolean } = {}): ShortsFeed {
     const requestedLimit = Number.isFinite(options.limit) ? Number(options.limit) : 50;
     const requestedOffset = Number.isFinite(options.offset) ? Number(options.offset) : 0;
     const limit = Math.min(Math.max(Math.trunc(requestedLimit), 1), 500);
@@ -314,8 +339,8 @@ export class VireloDB {
       SELECT m.*,p.position AS progress_position,p.duration AS progress_duration,p.completed AS progress_completed,(l.media_id IS NOT NULL) AS liked
       FROM media m LEFT JOIN progress p ON p.media_id=m.id LEFT JOIN likes l ON l.media_id=m.id
       WHERE ${visible.sql} AND ${cond}
-      ORDER BY m.added_at DESC,m.id DESC LIMIT ? OFFSET ?
-    `).all(...visible.params, limit, offset) as unknown as ShortsItem[];
+      ORDER BY shorts_rank(m.id,?),m.id LIMIT ? OFFSET ?
+    `).all(...visible.params, Number.isFinite(options.seed) ? Number(options.seed) >>> 0 : 0, limit, offset) as unknown as ShortsItem[];
     const total = Number((this.db.prepare(`SELECT COUNT(*) c FROM media m WHERE ${visible.sql} AND ${cond}`).get(...visible.params) as {c:number}).c);
     return { items, total };
   }
@@ -341,4 +366,11 @@ export class VireloDB {
     this.db.prepare(`INSERT INTO progress(media_id,position,duration,completed,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(media_id) DO UPDATE SET position=excluded.position,duration=excluded.duration,completed=excluded.completed,updated_at=excluded.updated_at`)
       .run(mediaId, safePosition, safeDuration, completed, Date.now());
   }
+}
+
+function shortsRank(id: number, seed: number) {
+  let hash = (id ^ seed) >>> 0;
+  hash = Math.imul(hash ^ (hash >>> 16), 0x7feb352d);
+  hash = Math.imul(hash ^ (hash >>> 15), 0x846ca68b);
+  return (hash ^ (hash >>> 16)) >>> 0;
 }

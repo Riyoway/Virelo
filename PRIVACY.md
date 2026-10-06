@@ -4,12 +4,12 @@ Virelo runs on the host computer and stores its catalog, settings, thumbnails, w
 
 ## Default behavior
 
-Virelo does not include telemetry, analytics, advertising, account registration, or automatic update checks. It does not request external metadata or artwork unless those options are enabled in Settings.
+Virelo does not include telemetry, analytics, advertising, account registration, or automatic update checks. New installations match filenames against Cinemeta during library scans and cache the returned metadata and artwork locally. Online matching and artwork downloads can be disabled independently in Settings.
 
 ## Optional external requests
 
-When external metadata is enabled and a user-provided TMDB API key is configured, Virelo sends title search queries and media identifiers to TMDB. Enabling external artwork also allows poster and backdrop downloads. Disabling these settings stops future TMDB requests initiated by Virelo.
+When online metadata is enabled, Virelo sends the parsed title, media type, release year when available, and season/episode numbers when applicable to Cinemeta. It downloads matched posters, backdrops, and episode images when artwork is enabled. An existing user-provided TMDB key, or the optional `VIRELO_TMDB_API_KEY` environment variable, makes Virelo use TMDB instead for backward compatibility and localized results. Disabling online metadata stops future provider requests initiated by Virelo.
 
 ## Video files
 
-Virelo streams source videos only to clients connected to the Virelo server. Its built-in TMDB integration never uploads video files to a third party.
+Virelo streams source videos only to clients connected to the Virelo server. Metadata matching never uploads video files to a third party.

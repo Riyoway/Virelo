@@ -7,10 +7,10 @@ import { basename, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { VireloDB } from './db.js';
 import { ensureDataDirs, type RuntimeConfig } from './config.js';
-import { scanAll } from './scanner.js';
-import { refreshMissingTmdbMetadata, refreshTmdbMetadata } from './metadata.js';
-import { hasFfmpeg, hasFfprobe } from './ffmpeg.js';
-import { startHlsTranscode, transcodeStatus, stopAllTranscodes } from './transcode.js';
+import { parseMediaName, scanAll } from './scanner.js';
+import { refreshMetadata, refreshMissingMetadata } from './metadata.js';
+import { hasFfmpeg, hasFfprobe, playbackQualities, probePlaybackInfo } from './ffmpeg.js';
+import { adaptiveTranscodeStatus, audioTranscodeStatus, extractSubtitleVtt, startAdaptiveTranscode, startAudioTranscode, startHlsTranscode, transcodeStatus, stopAllTranscodes } from './transcode.js';
 import type { AppSettings, MediaKind, ScanStatus, SortKey } from './types.js';
 import { VIRELO_VERSION } from './version.js';
 
@@ -53,6 +53,14 @@ function isPrivateHost(host: string, configHost: string) {
   if (cgnat && Number(cgnat[1]) >= 64 && Number(cgnat[1]) <= 127) return true;
   if (/^(fc|fd|fe[89ab])/i.test(normalized)) return true;
   return false;
+}
+
+function isTermuxRuntime() {
+  return Boolean(process.env.TERMUX_VERSION || process.env.PREFIX?.includes('/com.termux/'));
+}
+
+function isHiddenPath(path: string) {
+  return path.split(/[\\/]/).some((segment) => segment.startsWith('.') && segment !== '.' && segment !== '..');
 }
 
 export async function createVireloServer(config: RuntimeConfig) {
@@ -109,10 +117,10 @@ export async function createVireloServer(config: RuntimeConfig) {
       try {
         await scanAll(db, config.dataDir, scanStatus);
         const settings = db.getSettings();
-        if (settings.externalMetadataEnabled && settings.tmdbApiKey) {
-          scanStatus.message = 'Fetching permitted metadata';
-          const result = await refreshMissingTmdbMetadata(db, config.dataDir, (done, total) => {
-            scanStatus.message = `Fetching permitted metadata · ${done}/${total}`;
+        if (settings.externalMetadataEnabled) {
+          scanStatus.message = 'Matching metadata';
+          const result = await refreshMissingMetadata(db, config.dataDir, (done, total) => {
+            scanStatus.message = `Matching metadata · ${done}/${total}`;
           });
           scanStatus.message = result.attempted ? `Scan complete · ${result.updated} metadata matches` : 'Scan complete';
         } else {
@@ -135,12 +143,25 @@ export async function createVireloServer(config: RuntimeConfig) {
     if (!db.getSettings().libraryWatchEnabled) return;
     const paths = db.visibleLibraries().map((l) => l.path).filter((p) => existsSync(p));
     if (!paths.length) return;
-    watcher = chokidar.watch(paths, { ignoreInitial: true, awaitWriteFinish: { stabilityThreshold: 1200, pollInterval: 200 } });
+    watcher = chokidar.watch(paths, {
+      ignoreInitial: true,
+      ignored: isHiddenPath,
+      usePolling: isTermuxRuntime(),
+      awaitWriteFinish: { stabilityThreshold: 1200, pollInterval: 200 }
+    });
     const schedule = () => {
       if (watchDebounce) clearTimeout(watchDebounce);
       watchDebounce = setTimeout(() => { void runScan(); }, 1400);
     };
-    watcher.on('add', schedule).on('change', schedule).on('unlink', schedule).on('addDir', schedule).on('unlinkDir', schedule);
+    watcher
+      .on('add', schedule)
+      .on('change', schedule)
+      .on('unlink', schedule)
+      .on('addDir', schedule)
+      .on('unlinkDir', schedule)
+      .on('error', (error) => {
+        app.log.warn({ err: error }, 'Library watcher stopped; use Scan now to refresh manually');
+      });
   }
 
   app.get('/api/health', async () => ({ ok: true, version: VIRELO_VERSION, ffmpeg: await hasFfmpeg(), ffprobe: await hasFfprobe(), scan: scanStatus }));
@@ -156,7 +177,7 @@ export async function createVireloServer(config: RuntimeConfig) {
     db.updateSettings(patch);
     await refreshWatcher();
     const updatedSettings = db.getSettings();
-    if (updatedSettings.externalMetadataEnabled && updatedSettings.tmdbApiKey) void runScan();
+    if (updatedSettings.externalMetadataEnabled) void runScan();
     return publicSettings(updatedSettings);
   });
 
@@ -212,18 +233,84 @@ export async function createVireloServer(config: RuntimeConfig) {
     db.setProgress(id, Number(request.body?.position) || 0, Number(request.body?.duration) || 0);
     return { ok: true };
   });
-  app.post<{ Params: { id: string } }>('/api/media/:id/transcode/start', async (request, reply) => {
+  app.get<{ Params: { id: string } }>('/api/media/:id/playback', async (request, reply) => {
     const media = db.getMedia(Number(request.params.id));
     if (!media || !existsSync(media.path)) return reply.code(404).send({ error: 'Media file not found' });
-    return startHlsTranscode(config.dataDir, media.id, media.path);
+    const info = await probePlaybackInfo(media.path);
+    if (!info) return reply.code(503).send({ error: 'ffprobe is required to inspect audio and subtitle tracks.' });
+    return info;
   });
-  app.get<{ Params: { id: string } }>('/api/media/:id/transcode/status', async (request) => transcodeStatus(config.dataDir, Number(request.params.id)));
+  app.post<{ Params: { id: string }; Body: { audioStream?: number } }>('/api/media/:id/transcode/start', async (request, reply) => {
+    const media = db.getMedia(Number(request.params.id));
+    if (!media || !existsSync(media.path)) return reply.code(404).send({ error: 'Media file not found' });
+    const audioStream = request.body?.audioStream;
+    const info=await probePlaybackInfo(media.path);
+    if (audioStream !== undefined) {
+      if (!Number.isInteger(audioStream) || audioStream < 0) return reply.code(400).send({ error: 'Invalid audio stream.' });
+      if (!info?.audioTracks.some((track) => track.index === audioStream)) return reply.code(400).send({ error: 'Audio stream not found.' });
+    }
+    return startHlsTranscode(config.dataDir, media.id, media.path, { audioStream, copyVideo:info?.videoCodec==='h264' });
+  });
+  app.get<{ Params: { id: string }; Querystring: { audioStream?: string } }>('/api/media/:id/transcode/status', async (request, reply) => {
+    const audioStream = request.query.audioStream === undefined ? undefined : Number(request.query.audioStream);
+    if (audioStream !== undefined && (!Number.isInteger(audioStream) || audioStream < 0)) return reply.code(400).send({ error: 'Invalid audio stream.' });
+    return transcodeStatus(config.dataDir, Number(request.params.id), audioStream);
+  });
+  app.post<{ Params: { id: string }; Body: { audioStream?: number } }>('/api/media/:id/quality/start', async (request, reply) => {
+    const media=db.getMedia(Number(request.params.id));
+    if(!media||!existsSync(media.path))return reply.code(404).send({error:'Media file not found'});
+    const info=await probePlaybackInfo(media.path);
+    if(!info||!info.width||!info.height)return reply.code(503).send({error:'Video resolution could not be inspected.'});
+    const audioStream=request.body?.audioStream;
+    if(audioStream!==undefined&&(!Number.isInteger(audioStream)||!info.audioTracks.some((track)=>track.index===audioStream)))return reply.code(400).send({error:'Audio stream not found.'});
+    return startAdaptiveTranscode(config.dataDir,media.id,media.path,{audioStream,hasAudio:info.audioTracks.length>0,sourceWidth:info.width,sourceHeight:info.height,qualities:info.qualityOptions});
+  });
+  app.get<{ Params: { id: string }; Querystring: { audioStream?: string } }>('/api/media/:id/quality/status', async (request, reply) => {
+    const media=db.getMedia(Number(request.params.id));
+    if(!media||!existsSync(media.path))return reply.code(404).send({error:'Media file not found'});
+    const audioStream=request.query.audioStream===undefined?undefined:Number(request.query.audioStream);
+    if(audioStream!==undefined&&(!Number.isInteger(audioStream)||audioStream<0))return reply.code(400).send({error:'Invalid audio stream.'});
+    return adaptiveTranscodeStatus(config.dataDir,media.id,audioStream,playbackQualities(media.width,media.height));
+  });
+  app.post<{ Params: { id: string }; Body: { audioStream?: number } }>('/api/media/:id/audio/start', async (request, reply) => {
+    const media = db.getMedia(Number(request.params.id));
+    if (!media || !existsSync(media.path)) return reply.code(404).send({ error: 'Media file not found' });
+    const audioStream = request.body?.audioStream;
+    if (!Number.isInteger(audioStream) || Number(audioStream) < 0) return reply.code(400).send({ error: 'Invalid audio stream.' });
+    const info = await probePlaybackInfo(media.path);
+    if (!info?.audioTracks.some((track) => track.index === audioStream)) return reply.code(400).send({ error: 'Audio stream not found.' });
+    return startAudioTranscode(config.dataDir, media.id, media.path, Number(audioStream));
+  });
+  app.get<{ Params: { id: string }; Querystring: { audioStream?: string } }>('/api/media/:id/audio/status', async (request, reply) => {
+    const media = db.getMedia(Number(request.params.id));
+    if (!media) return reply.code(404).send({ error: 'Media file not found' });
+    const audioStream = Number(request.query.audioStream);
+    if (!Number.isInteger(audioStream) || audioStream < 0) return reply.code(400).send({ error: 'Invalid audio stream.' });
+    return audioTranscodeStatus(config.dataDir, media.id, audioStream);
+  });
+  app.get<{ Params: { id: string; stream: string } }>('/api/media/:id/subtitles/:stream', async (request, reply) => {
+    const media = db.getMedia(Number(request.params.id));
+    if (!media || !existsSync(media.path)) return reply.code(404).send({ error: 'Media file not found' });
+    const subtitleStream = Number(request.params.stream);
+    if (!Number.isInteger(subtitleStream) || subtitleStream < 0) return reply.code(400).send({ error: 'Invalid subtitle stream.' });
+    const info = await probePlaybackInfo(media.path);
+    const track = info?.subtitleTracks.find((candidate) => candidate.index === subtitleStream);
+    if (!track) return reply.code(404).send({ error: 'Subtitle stream not found.' });
+    if (!track.supported) return reply.code(415).send({ error: 'This subtitle format cannot be converted to WebVTT.' });
+    try {
+      const subtitle = await extractSubtitleVtt(config.dataDir, media.id, media.path, subtitleStream);
+      return reply.type('text/vtt; charset=utf-8').header('Cache-Control','private, max-age=86400').send(createReadStream(subtitle.path));
+    } catch (error) {
+      return reply.code(500).send({ error: error instanceof Error ? error.message : 'Subtitle conversion failed.' });
+    }
+  });
 
-  app.get<{ Querystring: { limit?: string; offset?: string } }>('/api/shorts', async (request) => {
+  app.get<{ Querystring: { limit?: string; offset?: string; seed?: string } }>('/api/shorts', async (request) => {
     const q = request.query;
     return db.getShorts({
       limit: q.limit ? Number(q.limit) : 50,
       offset: q.offset ? Number(q.offset) : 0,
+      seed: q.seed ? Number(q.seed) : 0,
       includeLandscapes: db.getSettings().shortsIncludeLandscapes
     });
   });
@@ -235,8 +322,16 @@ export async function createVireloServer(config: RuntimeConfig) {
     return { ok: true, liked };
   });
 
+  app.delete('/api/metadata', async () => db.clearAllExternalMetadata());
+
+  app.delete<{ Params: { id: string } }>('/api/media/:id/metadata', async (request, reply) => {
+    const media = db.getMedia(Number(request.params.id));
+    if (!media) return reply.code(404).send({ error: 'Media not found.' });
+    return db.clearExternalMetadata(media.id, parseMediaName(media.path));
+  });
+
   app.post<{ Params: { id: string } }>('/api/media/:id/metadata/refresh', async (request, reply) => {
-    try { return await refreshTmdbMetadata(db, config.dataDir, Number(request.params.id)); }
+    try { return await refreshMetadata(db, config.dataDir, Number(request.params.id)); }
     catch (error) { return reply.code(400).send({ error: error instanceof Error ? error.message : 'Metadata refresh failed' }); }
   });
 
@@ -286,6 +381,7 @@ export async function createVireloServer(config: RuntimeConfig) {
   });
 
   await app.register(fastifyStatic, { root: resolve(config.dataDir, 'cache', 'hls'), prefix: '/hls/', wildcard: true, decorateReply: false, cacheControl: false });
+  await app.register(fastifyStatic, { root: resolve(config.dataDir, 'cache', 'audio'), prefix: '/audio/', wildcard: true, decorateReply: false, cacheControl: false });
   await app.register(fastifyStatic, { root: webRoot, prefix: '/', wildcard: false, decorateReply: true });
   app.setNotFoundHandler(async (request, reply) => {
     if (request.url.startsWith('/api/')) return reply.code(404).send({ error: 'Not found' });

@@ -1,13 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Pause, Play, SpeakerHigh, SpeakerSlash } from '@phosphor-icons/react';
 import type { MediaItem } from '../types';
 
 const PREVIEW_WINDOW = 15;
 
 export function PreviewPlayer({ item, start }: { item: MediaItem; start: number }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [muted, setMuted] = useState(true);
-  const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [failed, setFailed] = useState(false);
 
@@ -35,27 +32,6 @@ export function PreviewPlayer({ item, start }: { item: MediaItem; start: number 
     setProgress(Math.min(1, Math.max(0, (video.currentTime - start) / PREVIEW_WINDOW)));
   };
 
-  const stopClick = (event: React.MouseEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
-  };
-
-  const toggleMute = (event: React.MouseEvent) => {
-    stopClick(event);
-    const video = videoRef.current;
-    if (!video) return;
-    video.muted = !video.muted;
-    setMuted(video.muted);
-  };
-
-  const togglePlay = (event: React.MouseEvent) => {
-    stopClick(event);
-    const video = videoRef.current;
-    if (!video) return;
-    if (video.paused) video.play().catch(() => { });
-    else video.pause();
-  };
-
   const restart = () => {
     const video = videoRef.current;
     if (!video) return;
@@ -73,14 +49,8 @@ export function PreviewPlayer({ item, start }: { item: MediaItem; start: number 
         preload="auto"
         onTimeUpdate={handleTimeUpdate}
         onEnded={restart}
-        onPlay={() => setPlaying(true)}
-        onPause={() => setPlaying(false)}
         onError={() => setFailed(true)}
       />
-      <div className="preview-controls">
-        <button type="button" aria-label={playing ? 'Pause preview' : 'Play preview'} onClick={togglePlay}>{playing ? <Pause weight="fill" /> : <Play weight="fill" />}</button>
-        <button type="button" aria-label={muted ? 'Unmute' : 'Mute'} onClick={toggleMute}>{muted ? <SpeakerSlash weight="fill" /> : <SpeakerHigh weight="fill" />}</button>
-      </div>
       <div className="preview-progress"><i style={{ width: `${progress * 100}%` }} /></div>
     </div>
   );

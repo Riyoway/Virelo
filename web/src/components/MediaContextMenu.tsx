@@ -12,6 +12,7 @@ export function MediaContextMenu({
   onFavorite,
   onPlay,
   onDetails,
+  returnFocus,
   onClose
 }: {
   item: MediaItem;
@@ -21,9 +22,13 @@ export function MediaContextMenu({
   onPlay: () => void;
   onDetails: () => void;
   onClose: () => void;
+  returnFocus?: HTMLElement|null;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
   const firstItemRef = useRef<HTMLButtonElement>(null);
+  const previousFocusRef = useRef<HTMLElement|null>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   const [offset, setOffset] = useState(position);
 
   useLayoutEffect(() => {
@@ -38,17 +43,22 @@ export function MediaContextMenu({
   }, [position]);
 
   useEffect(() => {
-    firstItemRef.current?.focus();
+    previousFocusRef.current = returnFocus ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    firstItemRef.current?.focus({ preventScroll: true });
     const onPointerDown = (event: PointerEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) onClose();
+      if (!menuRef.current?.contains(event.target as Node)) closeRef.current();
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
-        onClose();
+        previousFocusRef.current?.focus({ preventScroll: true });
+        closeRef.current();
       }
     };
-    const onViewportChange = () => onClose();
+    const onViewportChange = (event: Event) => {
+      if (event.target instanceof Node && menuRef.current?.contains(event.target)) return;
+      closeRef.current();
+    };
     document.addEventListener('pointerdown', onPointerDown);
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('scroll', onViewportChange, true);
@@ -59,9 +69,10 @@ export function MediaContextMenu({
       window.removeEventListener('scroll', onViewportChange, true);
       window.removeEventListener('resize', onViewportChange);
     };
-  }, [onClose]);
+  }, []);
 
   const choose = (action: () => void) => {
+    if (previousFocusRef.current?.isConnected) previousFocusRef.current.focus({ preventScroll: true });
     onClose();
     action();
   };
@@ -73,7 +84,25 @@ export function MediaContextMenu({
       role="menu"
       aria-label={`${item.title} actions`}
       style={{ left: offset.x, top: offset.y }}
-      onContextMenu={(event) => event.preventDefault()}
+      onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); }}
+      onClick={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
+      onKeyDown={(event) => {
+        event.stopPropagation();
+        const items = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? []);
+        const index = items.indexOf(document.activeElement as HTMLButtonElement);
+        let next: number | undefined;
+        if (event.key === 'ArrowDown') next = (index + 1) % items.length;
+        else if (event.key === 'ArrowUp') next = (index - 1 + items.length) % items.length;
+        else if (event.key === 'Home') next = 0;
+        else if (event.key === 'End') next = items.length - 1;
+        else if (event.key === 'Escape' || event.key === 'Tab') {
+          if (event.key === 'Escape') event.preventDefault();
+          if (previousFocusRef.current?.isConnected) previousFocusRef.current.focus({ preventScroll: true });
+          closeRef.current();
+        }
+        if (next !== undefined) { event.preventDefault(); items[next]?.focus(); }
+      }}
     >
       <div className="media-context-menu-title" title={item.title}>
         <span>{item.title}</span>

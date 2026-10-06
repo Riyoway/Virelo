@@ -38,6 +38,8 @@ export interface MediaRecord {
   overview: string | null;
   genres: string | null;
   external_id: string | null;
+  metadata_blocked?: number;
+  metadata_revision?: number;
   added_at: number;
   updated_at: number;
   progress_position?: number;
@@ -55,7 +57,7 @@ export interface FolderEntry {
 export interface AppSettings {
   externalMetadataEnabled: boolean;
   externalImagesEnabled: boolean;
-  metadataProvider: 'tmdb';
+  metadataProvider: 'cinemeta' | 'tmdb';
   metadataLanguage: string;
   tmdbApiKey: string;
   libraryWatchEnabled: boolean;
