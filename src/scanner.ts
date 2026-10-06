@@ -70,7 +70,7 @@ export async function scanLibrary(db: VireloDB, library: Library, dataDir: strin
     try {
       const info = await stat(path);
       const previous = db.getMediaByPath(path);
-      if (previous && previous.mtime === Math.trunc(info.mtimeMs) && previous.size === info.size) {
+      if (previous && previous.library_id === library.id && previous.mtime === Math.trunc(info.mtimeMs) && previous.size === info.size) {
         status.skipped++;
         return;
       }

@@ -2,6 +2,7 @@ import { lazy, Suspense, type ComponentType, type LazyExoticComponent } from 're
 import { createRootRoute, createRoute, createRouter, Outlet } from '@tanstack/react-router';
 import { Header } from './components/Header';
 import { MobileNav } from './components/MobileNav';
+import { NotFoundView } from './views/NotFoundView';
 import type { SortKey } from './types';
 
 const HomeView = lazy(async () => ({ default: (await import('./views/HomeView')).HomeView }));
@@ -21,7 +22,7 @@ export interface WatchRouteSearch {
 
 function validateWatchSearch(input: Record<string, unknown>): WatchRouteSearch {
   return {
-    queue: input.queue === '1' || input.queue === 'true',
+    queue: input.queue === true || input.queue === '1' || input.queue === 'true',
     folder: typeof input.folder === 'string' && input.folder !== '' ? input.folder.slice(0, 500) : undefined,
     libraryId: typeof input.libraryId === 'string' && /^\d+$/.test(input.libraryId) ? Number(input.libraryId) : undefined,
     sort: (['title', 'newest', 'oldest', 'year', 'duration', 'random'] as string[]).includes(String(input.sort ?? '')) ? input.sort as SortKey : undefined,
@@ -46,7 +47,7 @@ const WatchRouteView = withSuspense(WatchView);
 const DetailRouteView = withSuspense(DetailView);
 const ShortsRouteView = withSuspense(ShortsView);
 
-const rootRoute = createRootRoute({ component: Shell });
+const rootRoute = createRootRoute({ component: Shell, notFoundComponent: NotFoundView });
 const indexRoute = createRoute({ getParentRoute:()=>rootRoute, path:'/', component:HomeRouteView });
 const libraryRoute = createRoute({ getParentRoute:()=>rootRoute, path:'/library', component:LibraryRouteView });
 const settingsRoute = createRoute({ getParentRoute:()=>rootRoute, path:'/settings', component:SettingsRouteView });

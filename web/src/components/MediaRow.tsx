@@ -4,7 +4,7 @@ import type { MediaItem } from '../types';
 import { MediaCard } from './MediaCard';
 import { useRowWheel } from '../hooks/useRowWheel';
 
-export function MediaRow({title,items,playDirect=false}:{title:string;items:MediaItem[];playDirect?:boolean}) {
+export function MediaRow({title,items,playDirect=false,poster=false}:{title:string;items:MediaItem[];playDirect?:boolean;poster?:boolean}) {
   const ref = useRef<HTMLDivElement>(null);
   const hoverTimer = useRef<number | null>(null);
   const [activeId, setActiveId] = useState<number | null>(null);
@@ -23,6 +23,7 @@ export function MediaRow({title,items,playDirect=false}:{title:string;items:Medi
   useEffect(() => () => { if (hoverTimer.current) clearTimeout(hoverTimer.current); }, []);
 
   if (!items.length) return null;
+  const posterLayout = poster && !playDirect && items.some((item) => item.poster_path);
   const scroll = (dir:number) => ref.current?.scrollBy({ left: dir * Math.min(ref.current.clientWidth * .86, 1000), behavior:'smooth' });
   const handleHover = (id:number) => (hovered:boolean) => {
     if (hoverTimer.current) clearTimeout(hoverTimer.current);
@@ -32,7 +33,7 @@ export function MediaRow({title,items,playDirect=false}:{title:string;items:Medi
   return (
     <section className="media-section">
       <div className="section-heading"><h2>{title}</h2><div className="row-controls"><button onClick={()=>scroll(-1)} aria-label="Scroll left"><CaretLeft/></button><button onClick={()=>scroll(1)} aria-label="Scroll right"><CaretRight/></button></div></div>
-      <div className="media-row" ref={ref}>{items.map(item=><MediaCard key={item.id} item={item} playDirect={playDirect} preview={activeId===item.id} onHoverChange={handleHover(item.id)}/>)}</div>
+      <div className={`media-row${posterLayout?' poster-row':''}`} ref={ref}>{items.map(item=><MediaCard key={item.id} item={item} layout={posterLayout?'poster':'landscape'} playDirect={playDirect} preview={activeId===item.id} onHoverChange={handleHover(item.id)}/>)}</div>
     </section>
   );
 }
