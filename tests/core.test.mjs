@@ -21,7 +21,7 @@ test('parses movie and episode names', () => {
 
 test('builds an adaptive quality ladder without upscaling the source', () => {
   assert.deepEqual(playbackQualities(1920, 1080).map((quality) => quality.label), ['1080p', '720p', '480p', '360p']);
-  assert.deepEqual(playbackQualities(3840, 2160).map((quality) => quality.label), ['4K', '1440p', '1080p', '720p', '480p']);
+  assert.deepEqual(playbackQualities(3840, 2160).map((quality) => quality.label), ['4K', '1440p', '1080p', '720p', '480p', '360p']);
   assert.deepEqual(playbackQualities(1080, 1920).map((quality) => quality.label), ['1080p', '720p', '480p', '360p']);
   assert.deepEqual(playbackQualities(640, 360).map((quality) => quality.label), ['360p']);
 });

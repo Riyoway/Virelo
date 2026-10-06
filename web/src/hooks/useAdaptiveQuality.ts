@@ -1,4 +1,5 @@
 import { playVideo } from '../utils/media-playback';
+import { boundedQualityLevel } from '../utils/playback-quality';
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { api, type QualityTranscodeState } from '../api';
 import type { MediaItem, PlaybackQuality } from '../types';
@@ -14,6 +15,7 @@ export function useAdaptiveQuality(item:MediaItem,videoRef:RefObject<HTMLVideoEl
   const restoreCleanupRef=useRef<(()=>void)|null>(null);
   const variantsRef=useRef<QualityTranscodeState['variants']>([]);
   const selectedRef=useRef<number|null>(null);
+  const playbackBlocked=useRef(false);
   const [state,setState]=useState<AdaptiveState>('idle');
   const [error,setError]=useState('');
   const [selectedQuality,setSelectedQualityState]=useState<number|null>(null);
@@ -32,6 +34,7 @@ export function useAdaptiveQuality(item:MediaItem,videoRef:RefObject<HTMLVideoEl
     destroy();
     variantsRef.current=[];
     selectedRef.current=null;
+    playbackBlocked.current=false;
     setState('idle');
     setError('');
     setSelectedQualityState(null);
@@ -43,9 +46,12 @@ export function useAdaptiveQuality(item:MediaItem,videoRef:RefObject<HTMLVideoEl
   const applyHlsLevel=useCallback((height:number|null)=>{
     const hls=hlsRef.current;
     if(!hls)return;
-    const level=height===null?-1:hls.levels.findIndex((candidate)=>candidate.height===height);
+    const level=height===null?-1:boundedQualityLevel(hls.levels,height);
+    hls.autoLevelCapping=level;
+    hls.startLevel=level;
     // loadLevel accepts -1 for Auto and retains already buffered playback.
     hls.loadLevel=level;
+    if(level>=0&&hls.currentLevel>=0&&hls.currentLevel!==level)hls.nextLevel=level;
   },[]);
 
   const attach=useCallback(async(result:QualityTranscodeState,resumeAt:number,shouldPlay:boolean)=>{
@@ -73,6 +79,7 @@ export function useAdaptiveQuality(item:MediaItem,videoRef:RefObject<HTMLVideoEl
       restored=true;
       cleanupRestore();
       if(sourceTransition)sourceTransition.current=false;
+      playbackBlocked.current=false;
       setState('active');
       void playVideo(video,()=>attachToken===restoreToken.current&&(playIntent?.current ?? shouldPlay));
       finishAttach(true);
@@ -103,23 +110,36 @@ export function useAdaptiveQuality(item:MediaItem,videoRef:RefObject<HTMLVideoEl
           maxBufferLength:20,
           startPosition:resumeAt,
           startLevel:-1,
+          autoStartLoad:false,
           abrEwmaDefaultEstimate:sessionBandwidth
         });
         hlsRef.current=hls;
         hls.loadSource(result.playlist);
         hls.attachMedia(video);
-        hls.on(Hls.Events.MANIFEST_PARSED,()=>{manifestReady=true;applyHlsLevel(selectedRef.current);restore();});
+        hls.on(Hls.Events.MANIFEST_PARSED,()=>{
+          try{applyHlsLevel(selectedRef.current);manifestReady=true;hls.startLoad(resumeAt);restore();}
+          catch(reason){cleanupRestore();failAttach(reason instanceof Error?reason:new Error('The selected quality is unavailable.'));}
+        });
         hls.on(Hls.Events.FRAG_BUFFERED,()=>{
           if(Number.isFinite(hls.bandwidthEstimate)&&hls.bandwidthEstimate>0)sessionBandwidth=hls.bandwidthEstimate;
           restore();
         });
-        hls.on(Hls.Events.LEVEL_SWITCHED,(_event,data)=>setActiveQuality(hls.levels[data.level]?.height??null));
-        hls.on(Hls.Events.ERROR,(_event,data)=>{if(data.fatal){cleanupRestore();failAttach(new Error('Adaptive playback failed.'));setError('Adaptive playback failed.');setState('error');}});
+        hls.on(Hls.Events.LEVEL_SWITCHED,(_event,data)=>{
+          const level=hls.levels[data.level];
+          setActiveQuality(level?Math.min(level.width||level.height,level.height||level.width)||null:null);
+        });
+        hls.on(Hls.Events.ERROR,(_event,data)=>{if(data.fatal){
+          playbackBlocked.current=selectedRef.current!==null;
+          if(playbackBlocked.current){if(sourceTransition)sourceTransition.current=true;video.pause();hls.stopLoad();}
+          cleanupRestore();failAttach(new Error('Adaptive playback failed.'));setError('Adaptive playback failed.');setState('error');
+        }});
         return await attached;
       }
       if(video.canPlayType('application/vnd.apple.mpegurl')){
         const selected=selectedRef.current;
-        const url=selected===null?result.playlist:result.variants.find((variant)=>variant.height===selected)?.url||result.playlist;
+        const variant=selected===null?undefined:result.variants.filter(variant=>variant.height<=selected).sort((a,b)=>b.height-a.height)[0];
+        if(selected!==null&&!variant)throw new Error('The selected quality is unavailable.');
+        const url=selected===null?result.playlist:variant!.url;
         video.src=url;
         manifestReady=true;
         video.load();
@@ -132,7 +152,9 @@ export function useAdaptiveQuality(item:MediaItem,videoRef:RefObject<HTMLVideoEl
       cleanupRestore();
       destroy();
       // A failed handoff must not leave a previously playable original blank.
-      if(previousSource&&!previousSource.startsWith('blob:')){
+      playbackBlocked.current=selectedRef.current!==null;
+      video.pause();
+      if(!playbackBlocked.current&&previousSource&&!previousSource.startsWith('blob:')){
         const recoveryToken=restoreToken.current;
         const recover=()=>{
           if(recoveryToken!==restoreToken.current)return;
@@ -150,7 +172,7 @@ export function useAdaptiveQuality(item:MediaItem,videoRef:RefObject<HTMLVideoEl
         video.load();
       }
       setError(reason instanceof Error?reason.message:'Adaptive playback failed.');
-      if(sourceTransition)sourceTransition.current=false;
+      if(sourceTransition)sourceTransition.current=playbackBlocked.current||Boolean(previousSource&&!previousSource.startsWith('blob:'));
       setState('error');
       return false;
     }
@@ -159,6 +181,7 @@ export function useAdaptiveQuality(item:MediaItem,videoRef:RefObject<HTMLVideoEl
   const start=useCallback(async(audioStream:number|undefined,resumeAt:number,shouldPlay:boolean,keepPlaying=false)=>{
     const token=++requestToken.current;
     const video=videoRef.current;
+    playbackBlocked.current=selectedRef.current!==null;
     if(!keepPlaying){if(sourceTransition)sourceTransition.current=true;video?.pause();}
     setState('starting');
     setError('');
@@ -181,6 +204,7 @@ export function useAdaptiveQuality(item:MediaItem,videoRef:RefObject<HTMLVideoEl
       if(token!==requestToken.current)return false;
       setError(reason instanceof Error?reason.message:'Adaptive playback failed.');
       setState('error');
+      if(playbackBlocked.current){if(sourceTransition)sourceTransition.current=true;video?.pause();}
       return false;
     }
   },[attach,item.id,videoRef,sourceTransition]);
@@ -188,23 +212,38 @@ export function useAdaptiveQuality(item:MediaItem,videoRef:RefObject<HTMLVideoEl
   const setQuality=useCallback((height:number|null)=>{
     selectedRef.current=height;
     setSelectedQualityState(height);
-    if(hlsRef.current){applyHlsLevel(height);return;}
+    if(hlsRef.current){
+      try{applyHlsLevel(height);playbackBlocked.current=false;}
+      catch(reason){
+        playbackBlocked.current=true;
+        if(sourceTransition)sourceTransition.current=true;
+        videoRef.current?.pause();hlsRef.current.stopLoad();
+        setError(reason instanceof Error?reason.message:'The selected quality is unavailable.');setState('error');
+      }
+      return;
+    }
     const video=videoRef.current;
     const variants=variantsRef.current;
     if(!video||!variants.length)return;
     const currentTime=video.currentTime;
     const shouldPlay=!video.paused;
-    const url=height===null?variants[0].url.replace(/\d+\/index\.m3u8$/,'master.m3u8'):variants.find((variant)=>variant.height===height)?.url;
-    if(!url)return;
+    const url=height===null?variants[0].url.replace(/\d+\/index\.m3u8$/,'master.m3u8'):variants.filter(variant=>variant.height<=height).sort((a,b)=>b.height-a.height)[0]?.url;
+    if(!url){
+      playbackBlocked.current=true;
+      if(sourceTransition)sourceTransition.current=true;
+      video.pause();setError('The selected quality is unavailable.');setState('error');return;
+    }
     if(sourceTransition)sourceTransition.current=true;
     restoreToken.current++;
     restoreCleanupRef.current?.();
     const token=restoreToken.current;
+    playbackBlocked.current=height!==null;
     const restore=()=>{
       if(token!==restoreToken.current)return;
       cleanup();
       video.currentTime=currentTime;
       if(sourceTransition)sourceTransition.current=false;
+      playbackBlocked.current=false;
       void playVideo(video,()=>token===restoreToken.current&&(playIntent?.current ?? shouldPlay));
     };
     const cleanup=()=>{video.removeEventListener('loadedmetadata',restore);if(restoreCleanupRef.current===cleanup)restoreCleanupRef.current=null;};
@@ -215,5 +254,10 @@ export function useAdaptiveQuality(item:MediaItem,videoRef:RefObject<HTMLVideoEl
     setActiveQuality(height);
   },[applyHlsLevel,videoRef,playIntent,sourceTransition]);
 
-  return {state,error,start,selectedQuality,activeQuality,qualityOptions,setQuality,destroy};
+  const release=useCallback(()=>{
+    requestToken.current++;destroy();variantsRef.current=[];playbackBlocked.current=false;
+    setQualityOptions([]);setActiveQuality(null);setState('idle');setError('');
+  },[destroy]);
+
+  return {state,error,start,selectedQuality,activeQuality,qualityOptions,setQuality,destroy,release,playbackBlocked};
 }

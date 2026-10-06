@@ -52,8 +52,7 @@ export function playbackQualities(width: number | null, height: number | null): 
   const sourceHeight = Math.max(144, Math.round(Math.min(width, height) / 2) * 2);
   const standards = [2160, 1440, 1080, 720, 480, 360];
   const heights = [sourceHeight, ...standards.filter((candidate) => candidate < sourceHeight)]
-    .filter((candidate, index, values) => values.indexOf(candidate) === index)
-    .slice(0, 5);
+    .filter((candidate, index, values) => values.indexOf(candidate) === index);
   return heights.map((qualityHeight) => ({
     height: qualityHeight,
     label: qualityHeight >= 2160 ? '4K' : `${qualityHeight}p`,

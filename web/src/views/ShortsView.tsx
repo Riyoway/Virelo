@@ -4,6 +4,7 @@ import { useNavigate } from '@tanstack/react-router';
 import { ArrowDown, ArrowLeft, Heart, PictureInPicture, SpeakerHigh, SpeakerSlash, SpinnerGap } from '@phosphor-icons/react';
 import { api } from '../api';
 import { playVideo } from '../utils/media-playback';
+import { useBackgroundPlayback } from '../hooks/useBackgroundPlayback';
 import { MediaContextMenu } from '../components/MediaContextMenu';
 import { useHlsFallback } from '../hooks/useHlsFallback';
 import type { ShortItem } from '../types';
@@ -120,6 +121,18 @@ function ShortsClip({ item, active, onSkip, pipOn, onPip }: { item: ShortItem; a
   const wantsPlayback = useRef(active);
   const activeRef = useRef(active);
   activeRef.current = active;
+  const background=useBackgroundPlayback(item.id,videoRef,wantsPlayback,{
+    active,
+    resume:resumeBackground,
+    play:()=>{wantsPlayback.current=true;resumeBackground();},
+    pause:()=>{wantsPlayback.current=false;videoRef.current?.pause();}
+  });
+  function resumeBackground(){
+    const video=videoRef.current;
+    if(!video||!activeRef.current||!wantsPlayback.current)return;
+    background.suspended.current=false;
+    void playVideo(video,()=>activeRef.current&&wantsPlayback.current,()=>setMuted(true));
+  }
   const longPressTimer = useRef<number | null>(null);
   const longPressTriggered = useRef(false);
   const { fallback, error, startFallback } = useHlsFallback(item, videoRef, wantsPlayback);
@@ -199,7 +212,7 @@ function ShortsClip({ item, active, onSkip, pipOn, onPip }: { item: ShortItem; a
   function togglePlay() {
     const video = videoRef.current;
     if (!video) return;
-    wantsPlayback.current = video.paused;
+    wantsPlayback.current = background.suspended.current ? !wantsPlayback.current : video.paused;
     if (wantsPlayback.current) void playVideo(video, () => activeRef.current && wantsPlayback.current, () => setMuted(true)); else video.pause();
   }
 
@@ -301,6 +314,7 @@ function ShortsClip({ item, active, onSkip, pipOn, onPip }: { item: ShortItem; a
             togglePlay();
           }}
           onPause={(e) => {
+            background.handlePause(e.currentTarget);
             void api.progress(item.id, e.currentTarget.currentTime, e.currentTarget.duration);
           }}
           onTimeUpdate={(e) => report(e.currentTarget)}

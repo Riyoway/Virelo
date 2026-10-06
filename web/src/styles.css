@@ -304,7 +304,8 @@ button, a, input { -webkit-tap-highlight-color:transparent; }
 .player:not(.controls-visible) .player-gradient { opacity:0; }
 .player:not(.controls-visible) video { cursor:none; }
 .player-seek { width:100%; height:18px; accent-color:var(--color-brand); cursor:pointer; }
-.player-toolbar { display:flex; align-items:center; gap:12px; min-width:0; }
+.player-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:12px; min-width:0; }
+.player-toolbar>button { flex:none; }
 .player-toolbar>button,.playback-settings>button { width:38px; height:38px; display:grid; place-items:center; border:0; background:transparent; color:#fff; cursor:pointer; border-radius:50%; }
 .player-toolbar>button:hover,.playback-settings>button:hover { background:rgba(255,255,255,.12); }
 .player-toolbar>button:disabled,.playback-settings>button:disabled { opacity:.3; cursor:not-allowed; background:transparent; }
@@ -314,12 +315,13 @@ button, a, input { -webkit-tap-highlight-color:transparent; }
 .volume-slider { width:78px; accent-color:#fff; }
 .player-time { font-size:12px; color:#ddd; white-space:nowrap; }
 .player-toolbar>button:last-child { margin-left:auto; }
-.playback-settings { position:relative; flex:none; }
-.playback-settings-menu { position:absolute; z-index:30; right:-44px; bottom:48px; width:min(310px,calc(100vw - 28px)); max-height:min(58vh,430px); overflow:auto; padding:8px; border:1px solid rgba(255,255,255,.14); border-radius:14px; background:rgba(17,17,20,.96); box-shadow:0 18px 52px rgba(0,0,0,.55); backdrop-filter:blur(20px); color:var(--text); }
-.playback-settings-menu section+section { margin-top:6px; padding-top:7px; border-top:1px solid rgba(255,255,255,.08); }
-.playback-settings-menu h3 { display:flex; align-items:center; gap:8px; margin:0; padding:7px 9px 6px; color:var(--text-muted); font:700 11px/1.2 var(--font-body); letter-spacing:.08em; text-transform:uppercase; }
+.playback-settings { display:flex; align-items:center; gap:4px; flex:none; margin-left:auto; }
+.playback-settings>button[data-setting="quality"] { display:flex; align-items:center; justify-content:center; gap:6px; width:auto; min-width:38px; padding:0 9px; border-radius:6px; }
+.playback-quality-label { font-size:12px; font-weight:650; font-variant-numeric:tabular-nums; }
+.playback-settings-menu { position:fixed; z-index:150; display:flex; flex-direction:column; overflow:hidden; padding:6px; border:1px solid rgba(255,255,255,.12); border-radius:8px; background:#171719; box-shadow:0 8px 24px rgba(0,0,0,.45); color:var(--text); }
+.playback-settings-menu h3 { display:flex; flex:none; align-items:center; gap:8px; margin:0; padding:9px 10px 10px; color:var(--text); font:650 13px/1.2 var(--font-body); }
 .playback-settings-menu h3 svg { width:16px; height:16px; }
-.playback-track-list { display:grid; gap:2px; }
+.playback-track-list { display:grid; gap:2px; min-height:0; overflow:auto; overscroll-behavior:contain; scrollbar-width:thin; }
 .playback-track-list button { width:100%; min-height:48px; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:7px 9px; border:0; border-radius:9px; background:transparent; color:var(--text-muted); text-align:left; cursor:pointer; }
 .playback-track-list button:hover:not(:disabled),.playback-track-list button.selected { background:rgba(255,255,255,.075); color:var(--text); }
 .playback-track-list button:focus-visible { outline:2px solid var(--color-focus); outline-offset:-2px; }
@@ -519,7 +521,10 @@ button, a, input { -webkit-tap-highlight-color:transparent; }
   .player-caption { bottom:16px; max-width:88%; font-size:clamp(13px,3.8vw,18px); }
   .player.controls-visible .player-caption { bottom:76px; }
   .player-toolbar { gap:4px; }
-  .player-toolbar>button,.playback-settings>button { width:36px; height:36px; }
+  .player-toolbar>button,.playback-settings>button { width:32px; height:36px; }
+  .playback-settings { gap:0; }
+  .playback-settings>button[data-setting="quality"] { width:32px; min-width:32px; padding:0; }
+  .playback-quality-label { display:none; }
   .volume-slider { display:none; }
   .player-time { font-size:10px; }
   .playback-queue { margin:10px 12px 0; border-radius:13px; }
