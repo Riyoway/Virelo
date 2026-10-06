@@ -36,6 +36,7 @@ export interface MediaItem {
   added_at: number;
   updated_at: number;
   progress_position?: number;
+  progress_updated_at?: number;
   progress_duration?: number;
   progress_completed?: number;
   liked?: number;
@@ -48,6 +49,11 @@ export interface FolderEntry {
 }
 
 export interface HomeData {
+  favorites: MediaItem[];
+  nextEpisodes: MediaItem[];
+  unwatched: MediaItem[];
+  quickWatches: MediaItem[];
+  genres: Array<{name:string;items:MediaItem[]}>;
   recent: MediaItem[];
   continueWatching: MediaItem[];
   movies: MediaItem[];

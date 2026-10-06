@@ -1,71 +1,90 @@
-import { useEffect, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, type RefObject } from 'react';
 
-export function useRowWheel(ref: RefObject<HTMLDivElement | null>) {
+export function useRowWheel(ref: RefObject<HTMLDivElement | null>, itemCount=0) {
+  const cancelWheel=useRef<()=>void>(()=>{});
+  const scrollBy=useCallback((left:number)=>{
+    cancelWheel.current();
+    ref.current?.scrollBy({
+      left,
+      behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'
+    });
+  },[ref]);
+
   useEffect(() => {
     const el = ref.current;
     if (!el || !window.matchMedia('(hover: hover) and (pointer: fine)').matches) return;
 
+    const reducedMotion=window.matchMedia('(prefers-reduced-motion: reduce)');
     let animationFrame = 0;
     let target = el.scrollLeft;
     let lastFrameTime = 0;
+    let lastWheelTime = 0;
+    let wheelDirection = 0;
 
-    const clamp = (value: number) => Math.max(0, Math.min(el.scrollWidth - el.clientWidth, value));
+    const clamp = (value:number)=>Math.max(0,Math.min(Math.max(0,el.scrollWidth-el.clientWidth),value));
+    const cancel = () => {
+      if(animationFrame)cancelAnimationFrame(animationFrame);
+      animationFrame=0;lastFrameTime=0;wheelDirection=0;target=el.scrollLeft;
+    };
+    cancelWheel.current=cancel;
 
-    const animate = (time: number) => {
-      animationFrame = 0;
-      const current = el.scrollLeft;
-      const elapsed = lastFrameTime ? Math.min(time - lastFrameTime, 32) : 16;
-      lastFrameTime = time;
-      const progress = 1 - Math.exp(-elapsed / 90);
-      const next = current + (target - current) * progress;
-
-      if (Math.abs(target - next) < 0.5) {
-        el.scrollLeft = target;
-        lastFrameTime = 0;
-        return;
+    const animate = (time:number) => {
+      animationFrame=0;
+      target=clamp(target);
+      const current=el.scrollLeft;
+      const elapsed=lastFrameTime?Math.min(time-lastFrameTime,32):16;
+      lastFrameTime=time;
+      const next=current+(target-current)*(1-Math.exp(-elapsed/65));
+      // Pixel rounding or a resized rail must never leave an endless loop
+      // that fights the next button, keyboard or native trackpad operation.
+      if(Math.abs(target-current)<=1||Math.abs(next-current)<.5||time-lastWheelTime>800){
+        el.scrollTo({left:target,behavior:'instant'});
+        lastFrameTime=0;return;
       }
-
-      el.scrollLeft = next;
-      animationFrame = requestAnimationFrame(animate);
+      el.scrollTo({left:next,behavior:'instant'});
+      animationFrame=requestAnimationFrame(animate);
     };
 
-    const scheduleAnimation = () => {
-      if (!animationFrame) animationFrame = requestAnimationFrame(animate);
-    };
-
-    const onWheel = (event: WheelEvent) => {
-      if (el.scrollWidth <= el.clientWidth + 1) return;
-
-      // Horizontal trackpad gestures already scroll natively. Only translate
-      // vertical wheel input into horizontal movement for the chip rail.
-      if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
-
-      const scale = event.deltaMode === WheelEvent.DOM_DELTA_LINE
-        ? 16
-        : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
-          ? el.clientWidth
-          : 1;
-      const delta = event.deltaY * scale;
-      if (delta === 0) return;
-
-      const current = el.scrollLeft;
-      const maxScroll = el.scrollWidth - el.clientWidth;
-      const movingTarget = animationFrame ? target : current;
-      const nextTarget = clamp(movingTarget + delta);
-      const atStart = current <= 0 && target <= 0;
-      const atEnd = current >= maxScroll && target >= maxScroll;
-      if ((atStart && delta < 0) || (atEnd && delta > 0)) return;
-
-      target = nextTarget;
-      scheduleAnimation();
+    const onWheel = (event:WheelEvent) => {
+      if(event.ctrlKey||Math.abs(event.deltaY)<=Math.abs(event.deltaX)){
+        cancel();return; // Preserve pinch zoom and native horizontal trackpad input.
+      }
+      if(el.scrollWidth<=el.clientWidth+1){cancel();return;}
+      const scale=event.deltaMode===WheelEvent.DOM_DELTA_LINE?16:
+        event.deltaMode===WheelEvent.DOM_DELTA_PAGE?el.clientWidth:1;
+      const delta=event.deltaY*scale;
+      if(!Number.isFinite(delta)||delta===0)return;
+      const current=el.scrollLeft,maxScroll=el.scrollWidth-el.clientWidth;
+      if((current<=1&&delta<0)||(current>=maxScroll-1&&delta>0)){
+        cancel();return; // At the edge, let the page scroll normally.
+      }
+      const direction=Math.sign(delta);
+      if(!animationFrame||direction!==wheelDirection){
+        // A new wheel gesture takes over any browser smooth-scroll animation.
+        el.scrollTo({left:current,behavior:'instant'});
+        target=current;
+        lastFrameTime=0;
+      }
+      wheelDirection=direction;
+      target=clamp(target+delta);
+      lastWheelTime=performance.now();
       event.preventDefault();
+      if(reducedMotion.matches){
+        const next=target;cancel();el.scrollTo({left:next,behavior:'instant'});return;
+      }
+      if(!animationFrame)animationFrame=requestAnimationFrame(animate);
     };
 
-    el.addEventListener('wheel', onWheel, { passive: false });
-
+    el.addEventListener('wheel',onWheel,{passive:false});
+    el.addEventListener('pointerdown',cancel,{passive:true});
+    el.addEventListener('keydown',cancel);
     return () => {
-      el.removeEventListener('wheel', onWheel);
-      if (animationFrame) cancelAnimationFrame(animationFrame);
+      el.removeEventListener('wheel',onWheel);
+      el.removeEventListener('pointerdown',cancel);
+      el.removeEventListener('keydown',cancel);
+      cancel();
+      cancelWheel.current=()=>{};
     };
-  }, [ref]);
+  },[ref,itemCount]);
+  return scrollBy;
 }

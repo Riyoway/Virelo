@@ -1,6 +1,7 @@
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { parseMediaName } from './scanner.js';
+import { buildHome } from './home.js';
 import type { AppSettings, FolderEntry, Library, MediaRecord, MediaKind, ShortsFeed, ShortsItem, SortKey } from './types.js';
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -295,23 +296,13 @@ export class VireloDB {
 
   getHome() {
     const visible = this.visibleIdClause();
-    const select = `SELECT m.*,p.position AS progress_position,p.duration AS progress_duration,p.completed AS progress_completed,
+    // Curate one visible catalog snapshot; only bounded shelves are sent to clients.
+    const items = this.db.prepare(`SELECT m.*,p.position AS progress_position,
+      p.duration AS progress_duration,p.completed AS progress_completed,p.updated_at AS progress_updated_at,
       (l.media_id IS NOT NULL) AS liked
-      FROM media m
-      LEFT JOIN progress p ON p.media_id=m.id
-      LEFT JOIN likes l ON l.media_id=m.id
-      WHERE ${visible.sql}`;
-    const recent = this.db.prepare(`${select} ORDER BY m.added_at DESC LIMIT 24`).all(...visible.params) as unknown as MediaRecord[];
-    const cont = this.db.prepare(`SELECT m.*,p.position AS progress_position,p.duration AS progress_duration,p.completed AS progress_completed,
-      (l.media_id IS NOT NULL) AS liked
-      FROM progress p
-      JOIN media m ON m.id=p.media_id
-      LEFT JOIN likes l ON l.media_id=m.id
-      WHERE ${visible.sql} AND p.position>10 AND p.completed=0 ORDER BY p.updated_at DESC LIMIT 20`).all(...visible.params) as unknown as MediaRecord[];
-    const movies = this.db.prepare(`${select} AND m.kind='movie' ORDER BY m.added_at DESC LIMIT 24`).all(...visible.params) as unknown as MediaRecord[];
-    const series = this.db.prepare(`${select} AND m.kind='series' ORDER BY m.added_at DESC LIMIT 24`).all(...visible.params) as unknown as MediaRecord[];
-    const total = Number((this.db.prepare(`SELECT COUNT(*) c FROM media m WHERE ${visible.sql}`).get(...visible.params) as {c:number}).c);
-    return { recent, continueWatching: cont, movies, series, total };
+      FROM media m LEFT JOIN progress p ON p.media_id=m.id LEFT JOIN likes l ON l.media_id=m.id
+      WHERE ${visible.sql} ORDER BY m.added_at DESC,m.id DESC`).all(...visible.params) as unknown as MediaRecord[];
+    return buildHome(items);
   }
 
 
