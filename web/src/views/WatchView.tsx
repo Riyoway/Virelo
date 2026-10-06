@@ -19,16 +19,15 @@ export function WatchView(){
   });
   const itemQ = useQuery({queryKey:['media',Number(mediaId)],queryFn:()=>api.mediaById(Number(mediaId)),enabled:!queueEnabled});
   const items = queueEnabled ? (queueQ.data ?? []) : [];
-  const [index,setIndex] = useState(()=>items.findIndex((i)=>i.id===Number(mediaId)));
+  const [selectedId,setSelectedId] = useState(Number(mediaId));
+  const setIndex=(index:number)=>setSelectedId(items[index]?.id ?? Number(mediaId));
   useEffect(()=>{
-    if (!queueEnabled) return;
-    const found = items.findIndex((i)=>i.id===Number(mediaId));
-    setIndex(found>=0?found:0);
-  },[queueEnabled,mediaId,items]);
+    setSelectedId(Number(mediaId));
+  },[queueEnabled,mediaId,searchParams.search,searchParams.folder,searchParams.libraryId,searchParams.sort]);
 
   if (queueEnabled) {
     if (!queueQ.data) return <div className="watch-loading skeleton"/>;
-    const activeIndex=index>=0&&index<items.length?index:Math.max(items.findIndex((item)=>item.id===Number(mediaId)),0);
+    const activeIndex=Math.max(items.findIndex((item)=>item.id===selectedId),0);
     const current = items[activeIndex];
     if (!current) return <div className="watch-empty"><h1>No media in this folder</h1><p>The current filter matches no videos.</p></div>;
     const wraps=behavior==='loop';
@@ -56,6 +55,7 @@ export function WatchView(){
       </div>
     </div>;
   }
+  if (itemQ.isError) return <div className="watch-empty"><h1>Video unavailable</h1><p>{itemQ.error.message}</p><button onClick={()=>void itemQ.refetch()}>Try again</button></div>;
   if (itemQ.isLoading || !itemQ.data) return <div className="watch-loading skeleton"/>;
   return <div className="watch-view"><button className="watch-back" onClick={()=>history.back()} aria-label="Back"><ArrowLeft/></button><Player item={itemQ.data} autoPlay/><div className="watch-copy"><h1>{itemQ.data.title}</h1><p>{itemQ.data.overview||itemQ.data.filename}</p></div></div>;
 }

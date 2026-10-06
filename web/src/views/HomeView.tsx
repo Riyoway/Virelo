@@ -66,7 +66,7 @@ export function HomeView() {
         </section>
       )}
       <MediaRow title="Recently added" items={data.recent}/>
-      <MediaRow title="Movies" items={data.movies}/>
+      <MediaRow title="Movies" items={data.movies} poster/>
       <MediaRow title="Series" items={data.series}/>
     </div>
   </div>;

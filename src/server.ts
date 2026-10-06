@@ -7,7 +7,7 @@ import { basename, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { VireloDB } from './db.js';
 import { ensureDataDirs, type RuntimeConfig } from './config.js';
-import { scanAll } from './scanner.js';
+import { parseMediaName, scanAll } from './scanner.js';
 import { refreshMetadata, refreshMissingMetadata } from './metadata.js';
 import { hasFfmpeg, hasFfprobe, playbackQualities, probePlaybackInfo } from './ffmpeg.js';
 import { adaptiveTranscodeStatus, audioTranscodeStatus, extractSubtitleVtt, startAdaptiveTranscode, startAudioTranscode, startHlsTranscode, transcodeStatus, stopAllTranscodes } from './transcode.js';
@@ -244,12 +244,12 @@ export async function createVireloServer(config: RuntimeConfig) {
     const media = db.getMedia(Number(request.params.id));
     if (!media || !existsSync(media.path)) return reply.code(404).send({ error: 'Media file not found' });
     const audioStream = request.body?.audioStream;
+    const info=await probePlaybackInfo(media.path);
     if (audioStream !== undefined) {
       if (!Number.isInteger(audioStream) || audioStream < 0) return reply.code(400).send({ error: 'Invalid audio stream.' });
-      const info = await probePlaybackInfo(media.path);
       if (!info?.audioTracks.some((track) => track.index === audioStream)) return reply.code(400).send({ error: 'Audio stream not found.' });
     }
-    return startHlsTranscode(config.dataDir, media.id, media.path, { audioStream });
+    return startHlsTranscode(config.dataDir, media.id, media.path, { audioStream, copyVideo:info?.videoCodec==='h264' });
   });
   app.get<{ Params: { id: string }; Querystring: { audioStream?: string } }>('/api/media/:id/transcode/status', async (request, reply) => {
     const audioStream = request.query.audioStream === undefined ? undefined : Number(request.query.audioStream);
@@ -305,11 +305,12 @@ export async function createVireloServer(config: RuntimeConfig) {
     }
   });
 
-  app.get<{ Querystring: { limit?: string; offset?: string } }>('/api/shorts', async (request) => {
+  app.get<{ Querystring: { limit?: string; offset?: string; seed?: string } }>('/api/shorts', async (request) => {
     const q = request.query;
     return db.getShorts({
       limit: q.limit ? Number(q.limit) : 50,
       offset: q.offset ? Number(q.offset) : 0,
+      seed: q.seed ? Number(q.seed) : 0,
       includeLandscapes: db.getSettings().shortsIncludeLandscapes
     });
   });
@@ -319,6 +320,14 @@ export async function createVireloServer(config: RuntimeConfig) {
     const liked = request.body?.liked === true;
     db.setLike(id, liked);
     return { ok: true, liked };
+  });
+
+  app.delete('/api/metadata', async () => db.clearAllExternalMetadata());
+
+  app.delete<{ Params: { id: string } }>('/api/media/:id/metadata', async (request, reply) => {
+    const media = db.getMedia(Number(request.params.id));
+    if (!media) return reply.code(404).send({ error: 'Media not found.' });
+    return db.clearExternalMetadata(media.id, parseMediaName(media.path));
   });
 
   app.post<{ Params: { id: string } }>('/api/media/:id/metadata/refresh', async (request, reply) => {

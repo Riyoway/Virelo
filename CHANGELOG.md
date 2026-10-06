@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Remove persistent Shorts play/pause controls, move sound above Like, shuffle each Shorts visit and preserve clip alignment on rotation.
+- Respect pause/play intent during quality and audio preparation, cancel stale source restores, and keep preparation overlays off paused playback.
+- Add a settings-level bulk metadata reset across all libraries, preserving files, thumbnails, favorites and watch progress without automatic rematching.
+- Replace browser confirmation dialogs with Virelo-styled accessible modals, including cancellation, pending protection and inline error/retry.
+- Contain field focus, flatten native seek tracks, and fix context-menu event propagation and keyboard focus.
+- Keep queue selection stable on refresh and add repeatable browser/FFmpeg regression audits.
+
+- Start playable videos directly on LAN connections instead of waiting for Auto quality renditions; prepare adaptive HLS only after sustained buffering.
+- Keep preparation indicators off already-playing video and retain the session's bandwidth estimate between adaptive videos.
+- Start compatible HLS from completed segments while conversion continues, copying H.264 video when only audio needs conversion.
+- Preserve playback positions during progressive HLS handoffs and keep interrupted caches and failed conversion jobs from being mistaken for ready playback.
+
 ## 0.2.1 — 2026-08-22
 
 - Fixed first-play audio fallback starting before FFmpeg had finished writing the converted HLS playlist.
