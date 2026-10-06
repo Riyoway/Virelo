@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, type RefObject } from 'react';
 
-export function useRowWheel(ref: RefObject<HTMLDivElement | null>, itemCount=0) {
+export function useRowWheel(ref: RefObject<HTMLElement | null>, itemCount=0) {
   const cancelWheel=useRef<()=>void>(()=>{});
   const scrollBy=useCallback((left:number)=>{
     cancelWheel.current();

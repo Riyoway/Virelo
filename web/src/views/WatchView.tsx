@@ -5,6 +5,7 @@ import { ArrowLeft } from '@phosphor-icons/react';
 import { api } from '../api';
 import { PlaybackQueue } from '../components/PlaybackQueue';
 import { Player } from '../components/Player';
+import { queueDestination, type RepeatMode } from '../utils/playback-repeat';
 
 export function WatchView(){
   const { mediaId } = useParams({from:'/watch/$mediaId'});
@@ -12,6 +13,8 @@ export function WatchView(){
   const queueEnabled = Boolean(searchParams.queue);
   const settingsQ = useQuery({queryKey:['settings'],queryFn:api.settings});
   const behavior = settingsQ.data?.queueBehavior ?? 'auto';
+  const [repeatOverride,setRepeatOverride]=useState<RepeatMode|null>(null);
+  const repeat=repeatOverride??(behavior==='loop'?'queue':'off');
   const queueQ = useQuery({
     queryKey:['watch-queue',searchParams],
     queryFn:()=>api.media({search:searchParams.search,folder:searchParams.folder,libraryId:searchParams.libraryId,sort:searchParams.sort,limit:500}),
@@ -30,7 +33,7 @@ export function WatchView(){
     const activeIndex=Math.max(items.findIndex((item)=>item.id===selectedId),0);
     const current = items[activeIndex];
     if (!current) return <div className="watch-empty"><h1>No media in this folder</h1><p>The current filter matches no videos.</p></div>;
-    const wraps=behavior==='loop';
+    const wraps=repeat==='queue';
     const canGoPrevious=items.length>1&&(activeIndex>0||wraps);
     const canGoNext=items.length>1&&(activeIndex<items.length-1||wraps);
     const selectIndex=(target:number)=>{
@@ -38,17 +41,15 @@ export function WatchView(){
       if(target>=items.length){if(wraps)setIndex(0);return;}
       setIndex(target);
     };
-    const advance=(dir:number)=>selectIndex(activeIndex+dir);
+    const advance=(dir:1|-1)=>{const next=queueDestination(activeIndex,items.length,dir,repeat);if(next!==null)setIndex(next);};
     const handleEnded=()=>{
-      const last=activeIndex>=items.length-1;
-      if (last) { if (behavior==='loop') setIndex(0); return; }
-      if (behavior==='manual') return;
-      setIndex(activeIndex+1);
+      const next=queueDestination(activeIndex,items.length,1,repeat,true,behavior!=='manual');
+      if(next!==null)setIndex(next);
     };
     return <div className="watch-view">
       <button className="watch-back" onClick={()=>history.back()} aria-label="Back"><ArrowLeft/></button>
-      <Player item={current} queue={items} queueIndex={activeIndex} onEnded={handleEnded} onNext={()=>advance(1)} onPrev={()=>advance(-1)} canGoNext={canGoNext} canGoPrev={canGoPrevious} autoPlay/>
-      <PlaybackQueue items={items} activeIndex={activeIndex} canGoPrevious={canGoPrevious} canGoNext={canGoNext} onSelect={selectIndex} onPrevious={()=>advance(-1)} onNext={()=>advance(1)}/>
+      <Player item={current} queue={items} queueIndex={activeIndex} onEnded={handleEnded} onNext={()=>advance(1)} onPrev={()=>advance(-1)} canGoNext={canGoNext} canGoPrev={canGoPrevious} repeatMode={repeat} onRepeatChange={setRepeatOverride} autoPlay/>
+      <PlaybackQueue items={items} activeIndex={activeIndex} repeatMode={repeat} onRepeatChange={setRepeatOverride} onSelect={selectIndex}/>
       <div className="watch-copy">
         <h1>{current.title}</h1>
         <p className="watch-description">{current.overview||current.filename}</p>

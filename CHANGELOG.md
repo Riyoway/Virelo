@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Group player viewing controls, theme scrollbars, and add keyboard-accessible video context menus that work in fullscreen.
+- Add explicit repeat-off, repeat-video and repeat-queue modes, retaining the choice between queued videos and supporting single-item queues.
+- Replace framed queue cards with a compact filmstrip; scroll its rail with arrows, wheel, touch and keyboard without changing playback. Keep captions above wrapping controls on narrow screens.
+
 ## 0.3.0 — 2026-10-06
 
 - Integrate Home categories into desktop navigation, restore compact featured-title dots and automatic rotation with hover/focus, hidden-tab, visibility and reduced-motion safeguards.

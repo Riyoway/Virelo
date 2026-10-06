@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowsOut, FastForward, Pause, PictureInPicture, Play, RepeatOnce, Rewind, SkipBack, SkipForward, SpeakerHigh, SpeakerSlash, SpinnerGap } from '@phosphor-icons/react';
+import { ArrowsOut, FastForward, Pause, PictureInPicture, Play, Rewind, SkipBack, SkipForward, SpeakerHigh, SpeakerSlash, SpinnerGap } from '@phosphor-icons/react';
 import { api } from '../api';
 import { useHlsFallback } from '../hooks/useHlsFallback';
 import { useAdaptiveQuality } from '../hooks/useAdaptiveQuality';
@@ -8,8 +8,12 @@ import { qualityLabel, readQualityPreference, resolvePreferredQuality, saveQuali
 import { toggleFullscreen } from '../utils/fullscreen';
 import { DraggableCaption, HiddenSubtitleTrack } from './DraggableCaption';
 import { PlaybackSettingsMenu } from './PlaybackSettingsMenu';
+import { RepeatControl } from './RepeatControl';
+import { PlayerActionMenu } from './PlayerActionMenu';
+import { repeatLabels, type RepeatMode } from '../utils/playback-repeat';
 import { useBackgroundPlayback } from '../hooks/useBackgroundPlayback';
 import type { MediaItem, PlaybackInfo } from '../types';
+import '../player-ui.css';
 
 interface PlayerProps {
   item: MediaItem;
@@ -21,12 +25,14 @@ interface PlayerProps {
   canGoNext?: boolean;
   canGoPrev?: boolean;
   autoPlay?: boolean;
+  repeatMode?: RepeatMode;
+  onRepeatChange?: (mode:RepeatMode) => void;
 }
 
 const DIRECT_AUDIO_CODECS=new Set(['aac','flac','mp3','opus','vorbis']);
 type HlsInstance=InstanceType<(typeof import('hls.js/light'))['default']>;
 
-export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=true,canGoPrev=true,autoPlay}:PlayerProps) {
+export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=true,canGoPrev=true,autoPlay,repeatMode,onRepeatChange}:PlayerProps) {
   const localPlayback=isLocalPlaybackHost();
   const videoRef = useRef<HTMLVideoElement>(null);
   const sourceTransition = useRef(false);
@@ -67,8 +73,18 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
   const [muted,setMuted] = useState(false);
   const [pip,setPip] = useState(false);
   const [pipSupported,setPipSupported] = useState(false);
-  const [looping,setLooping] = useState(false);
+  const [singleRepeat,setSingleRepeat] = useState<RepeatMode>('off');
+  const repeat=repeatMode??singleRepeat;
+  const changeRepeat=onRepeatChange??setSingleRepeat;
+  const [contextPosition,setContextPosition]=useState<{x:number;y:number}|null>(null);
   const [controlsVisible,setControlsVisible] = useState(true);
+  useEffect(()=>{
+    const player=containerRef.current, controls=player?.querySelector<HTMLElement>('.player-controls');
+    if(!player||!controls)return;
+    const update=()=>player.style.setProperty('--player-controls-height',`${controls.offsetHeight+14}px`);
+    const observer=new ResizeObserver(update);observer.observe(controls);update();
+    return()=>observer.disconnect();
+  },[]);
 
   const background=useBackgroundPlayback(item.id,videoRef,wantsPlayback,{
     transition:sourceTransition,
@@ -82,6 +98,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
     wantsPlayback.current=Boolean(autoPlay);
     setPlayRequested(Boolean(autoPlay));
     playbackItemId.current=item.id;
+    setContextPosition(null);
     audioToken.current++;
     audioSourceToken.current++;
     videoFallbackRequested.current=false;
@@ -318,7 +335,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
     if(!video||video.paused){controlsTimer.current=null;return;}
     controlsTimer.current=window.setTimeout(()=>{
       const keyboardFocus=containerRef.current?.querySelector(':focus-visible');
-      if(keyboardFocus||containerRef.current?.querySelector('.playback-settings button[aria-expanded="true"]')){scheduleControlsHide();return;}
+      if(keyboardFocus||document.querySelector('.player-action-menu')||containerRef.current?.querySelector('.playback-settings button[aria-expanded="true"]')){scheduleControlsHide();return;}
       setControlsVisible(false);
       controlsTimer.current=null;
     },2400);
@@ -534,12 +551,15 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
   }
 
   const pauseAction=playing||(playRequested&&(audioPreparing||qualityState==='starting'||fallback==='starting'));
-  return <div className={`player${queue?.length?' has-queue':''}${controlsVisible?' controls-visible':''}`} ref={containerRef} onDoubleClick={()=>void fullscreen()} onPointerMove={(event)=>{if(event.pointerType==='mouse'){revealControls();scheduleControlsHide();}}} onPointerDown={revealControls} onPointerUp={scheduleControlsHide} onPointerCancel={scheduleControlsHide} onPointerLeave={scheduleControlsHide} onFocusCapture={revealControls} onBlurCapture={scheduleControlsHide} onKeyDown={()=>{revealControls();scheduleControlsHide();}}>
+  return <div className={`player${queue?.length?' has-queue':''}${controlsVisible?' controls-visible':''}`} ref={containerRef} tabIndex={0} aria-label={item.title+' player'}
+    onContextMenu={event=>{event.preventDefault();event.stopPropagation();revealControls();setContextPosition({x:event.clientX,y:event.clientY});}}
+    onDoubleClick={()=>void fullscreen()} onPointerMove={(event)=>{if(event.pointerType==='mouse'){revealControls();scheduleControlsHide();}}} onPointerDown={revealControls} onPointerUp={scheduleControlsHide} onPointerCancel={scheduleControlsHide} onPointerLeave={scheduleControlsHide} onFocusCapture={revealControls} onBlurCapture={scheduleControlsHide}
+    onKeyDown={event=>{revealControls();scheduleControlsHide();if(event.target===event.currentTarget&&(event.key==='ContextMenu'||(event.shiftKey&&event.key==='F10'))){event.preventDefault();const bounds=event.currentTarget.getBoundingClientRect();setContextPosition({x:bounds.left+24,y:bounds.top+24});}}}>
     <video
       ref={videoRef}
       src={`/api/media/${item.id}/stream`}
       playsInline
-      loop={looping}
+      loop={repeat==='one'||(repeat==='queue'&&queue?.length===1)}
       preload={typeof readQualityPreference(!localPlayback)==='number'?'none':autoPlay?'auto':'metadata'}
       autoPlay={false}
       crossOrigin="anonymous"
@@ -588,19 +608,22 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
     {fallback==='starting'&&playRequested&&(!playing||buffering) && <div className="player-status"><SpinnerGap className="spin"/><strong>{playbackInfo?.requiresVideoTranscode?'Preparing video…':'Preparing audio…'}</strong></div>}
     {(qualitySelectionError||fallback==='error'||audioError||(qualityState==='error'&&qualityRequested.current&&!playing)) && <div className="player-status error"><strong>Playback unavailable</strong><span>{qualitySelectionError||audioError||error||qualityError}{playbackBlocked.current&&!qualitySelectionError?' Choose another quality to continue; your quality limit has been kept.':''}</span></div>}
     <div className="player-gradient"/>
-    <div className="player-controls">
+    <div className="player-controls" onDoubleClick={event=>event.stopPropagation()}>
       <input className="player-seek" style={{'--range-fill':`${Math.min(100, duration > 0 ? current/duration*100 : 0)}%`} as React.CSSProperties} aria-label="Seek" type="range" min="0" max={Math.max(duration,1)} step="0.1" value={Math.min(current,Math.max(duration,1))} onChange={(e)=>seek(Number(e.target.value))}/>
       <div className="player-toolbar">
+        <div className="player-transport">
         {onPrev && <button onClick={onPrev} aria-label="Previous video" disabled={!canGoPrev}><SkipBack weight="fill"/></button>}
         <button className="skip-button" onClick={()=>seekBy(-10)} aria-label="Rewind 10 seconds"><Rewind weight="bold"/></button>
         <button onClick={toggle} aria-label={pauseAction?'Pause':'Play'} aria-busy={audioPreparing}>{pauseAction?<Pause weight="fill"/>:<Play weight="fill"/>}</button>
         <button className="skip-button" onClick={()=>seekBy(10)} aria-label="Fast-forward 10 seconds"><FastForward weight="bold"/></button>
         {onNext && <button onClick={onNext} aria-label="Next video" disabled={!canGoNext}><SkipForward weight="fill"/></button>}
-        <button className={looping?'active':''} onClick={()=>setLooping((value)=>!value)} aria-label={looping?'Turn off loop':'Loop current video'} aria-pressed={looping}><RepeatOnce weight={looping?'fill':'regular'}/></button>
+        <RepeatControl mode={repeat} hasQueue={Boolean(queue?.length)} onChange={changeRepeat}/>
         <button onClick={toggleMute} aria-label={muted?'Unmute':'Mute'}>{muted?<SpeakerSlash weight="fill"/>:<SpeakerHigh weight="fill"/>}</button>
         <input className="volume-slider" style={{'--range-fill':`${muted ? 0 : volume*100}%`} as React.CSSProperties} aria-label="Volume" type="range" min="0" max="1" step="0.05" value={muted?0:volume} onChange={(e)=>setVol(Number(e.target.value))}/>
         <span className="player-time">{time(current)} / {time(duration)}</span>
         {queue && queueIndex!==undefined && <span className="player-queue">{queueIndex+1} / {queue.length}</span>}
+        </div>
+        <div className="player-tools">
         {playbackInfo&&<PlaybackSettingsMenu key={item.id}
           audioTracks={playbackInfo.audioTracks}
           subtitleTracks={playbackInfo.subtitleTracks}
@@ -617,8 +640,22 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
         />}
         {pipSupported && <button onClick={()=>void togglePip()} aria-label={pip?'Exit Picture in Picture':'Picture in Picture'} className={pip?'active':''}>{pip?<PictureInPicture weight="fill"/>:<PictureInPicture/>}</button>}
         <button onClick={()=>void fullscreen()} aria-label="Fullscreen"><ArrowsOut/></button>
+        </div>
       </div>
     </div>
+    {contextPosition&&<PlayerActionMenu label="Video actions" position={contextPosition} returnFocus={containerRef.current} onClose={()=>setContextPosition(null)}
+      actions={[
+        {label:pauseAction?'Pause':'Play',icon:pauseAction?<Pause/>:<Play/>,action:toggle},
+        {label:'Rewind 10 seconds',icon:<Rewind/>,action:()=>seekBy(-10)},
+        {label:'Fast-forward 10 seconds',icon:<FastForward/>,action:()=>seekBy(10)},
+        {label:muted?'Unmute':'Mute',icon:muted?<SpeakerSlash/>:<SpeakerHigh/>,action:toggleMute},
+        ...(queue?.length?['off','one','queue'] as const:['off','one'] as const).map(mode=>({label:repeatLabels[mode],checked:repeat===mode,action:()=>changeRepeat(mode)})),
+        ...(['quality','audio','subtitles'] as const).filter(setting=>containerRef.current?.querySelector(`[data-setting="${setting}"]`)).map(setting=>({
+          label:setting==='quality'?'Quality':setting==='audio'?'Audio':'Subtitles',action:()=>containerRef.current?.querySelector<HTMLButtonElement>(`[data-setting="${setting}"]`)?.click()
+        })),
+        ...(pipSupported?[{label:pip?'Exit Picture in Picture':'Picture in Picture',icon:<PictureInPicture/>,action:()=>void togglePip()}]:[]),
+        {label:'Fullscreen',icon:<ArrowsOut/>,action:()=>void fullscreen()}
+      ]}/>}
   </div>;
 }
 

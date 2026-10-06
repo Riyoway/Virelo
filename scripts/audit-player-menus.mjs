@@ -25,6 +25,7 @@ try {
    const React=(await import(imports.find(url=>url.includes('/react.js')))).default;
    const {createRoot}=(await import(imports.find(url=>url.includes('/react-dom_client.js')))).default;
    const {PlaybackSettingsMenu}=await import('/src/components/PlaybackSettingsMenu.tsx');
+   await import('/src/player-ui.css');
    const {Play,SpeakerHigh,ArrowsOut,Rewind,FastForward,RepeatOnce,PictureInPicture,SkipBack,SkipForward}=await import('/@id/@phosphor-icons/react');
    document.body.replaceChildren();
    const node=document.createElement('main');node.style.cssText='max-width:980px;margin:48px auto;';document.body.append(node);
@@ -44,16 +45,18 @@ try {
       h('div',{className:'player-controls'},
        h('input',{className:'player-seek',type:'range','aria-label':'Seek'}),
        h('div',{className:'player-toolbar'},
+        h('div',{className:'player-transport'},
         button(SkipBack,'Previous video'),h('button',{className:'skip-button','aria-label':'Rewind'},h(Rewind)),button(Play,'Play'),
         h('button',{className:'skip-button','aria-label':'Fast-forward'},h(FastForward)),button(SkipForward,'Next video'),
         button(RepeatOnce,'Loop'),button(SpeakerHigh,'Mute'),
         h('input',{className:'volume-slider',type:'range','aria-label':'Volume'}),
-        h('span',{className:'player-time'},'24:14 / 1:48:00'),h('span',{className:'player-queue'},'1 / 12'),
+        h('span',{className:'player-time'},'24:14 / 1:48:00'),h('span',{className:'player-queue'},'1 / 12')),
+        h('div',{className:'player-tools'},
         h(PlaybackSettingsMenu,{audioTracks:limited?tracks.slice(0,1):tracks,subtitleTracks:limited?[]:captions,
           qualityOptions:limited?[{height:1080,label:'1080p',bitrate:5000000}]:[1080,720,480,360].map(height=>({height,label:height+'p',bitrate:1400000})),
           selectedAudio,selectedSubtitle,selectedQuality,busy,allowAutoQuality:false,
           onSelectAudio:select('audio',audio),onSelectSubtitle:select('subtitles',subtitle),onSelectQuality:select('quality',quality)}),
-        button(PictureInPicture,'Picture in Picture'),button(ArrowsOut,'Fullscreen'))));
+        button(PictureInPicture,'Picture in Picture'),button(ArrowsOut,'Fullscreen')))));
    }
    root.render(h(Demo));
   },mode);
@@ -106,6 +109,7 @@ try {
   check(await menu('Quality').evaluate(e=>document.fullscreenElement?.contains(e)),mode+' menu renders inside fullscreen');
   await page.keyboard.press('Escape');await page.evaluate(()=>document.exitFullscreen());
   await page.evaluate(()=>window.__limited(true));
+  await trigger('Audio').waitFor({state:'hidden'});await trigger('Subtitles').waitFor({state:'hidden'});
   check(await trigger('Audio').count()===0&&await trigger('Subtitles').count()===0,mode+' unavailable track controls omitted');
   await trigger('Quality').click();
   check(await menu('Quality').getByRole('menuitemradio').count()===1,mode+' original quality remains accessible when only one choice exists');
