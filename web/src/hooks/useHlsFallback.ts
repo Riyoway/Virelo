@@ -1,4 +1,5 @@
 import { playVideo } from '../utils/media-playback';
+import { needsSeekWindow } from '../utils/playback-seek';
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { api } from '../api';
 import type { MediaItem } from '../types';
@@ -13,6 +14,7 @@ export function useHlsFallback(item: MediaItem, videoRef: RefObject<HTMLVideoEle
   const restoreCleanupRef = useRef<(()=>void)|null>(null);
   const stateRef = useRef<FallbackState>('idle');
   const variantRef = useRef<number|null>(null);
+  const windowStartRef=useRef(0);
   const [fallback, setFallbackState] = useState<FallbackState>('idle');
   const [activeAudioStream, setActiveAudioStream] = useState<number|null>(null);
   const [error, setError] = useState('');
@@ -35,6 +37,7 @@ export function useHlsFallback(item: MediaItem, videoRef: RefObject<HTMLVideoEle
   useEffect(() => {
     stopCurrent();
     variantRef.current = null;
+    windowStartRef.current=0;
     setActiveAudioStream(null);
     setState('idle');
     setError('');
@@ -109,10 +112,10 @@ export function useHlsFallback(item: MediaItem, videoRef: RefObject<HTMLVideoEle
     }
   }, [setState, stopCurrent, videoRef, playIntent, sourceTransition]);
 
-  const startFallback = useCallback(async (audioStream?: number, resumeAt?: number, shouldPlay?: boolean) => {
+  const startFallback = useCallback(async (audioStream?: number, resumeAt?: number, shouldPlay?: boolean, force=false) => {
     const requestedStream = audioStream ?? null;
-    if (stateRef.current === 'starting' && variantRef.current === requestedStream) return;
-    if (stateRef.current === 'active' && variantRef.current === requestedStream) return;
+    if (!force&&stateRef.current === 'starting' && variantRef.current === requestedStream) return;
+    if (!force&&stateRef.current === 'active' && variantRef.current === requestedStream) return;
     const video = videoRef.current;
     const position = resumeAt ?? video?.currentTime ?? 0;
     const resumePlayback = shouldPlay ?? Boolean(video && !video.paused);
@@ -122,18 +125,20 @@ export function useHlsFallback(item: MediaItem, videoRef: RefObject<HTMLVideoEle
     setState('starting');
     setError('');
     try {
-      let start = await api.startTranscode(item.id, audioStream);
+      let start = await api.startTranscode(item.id, audioStream,position);
+      const startTime=start.startTime??0;
       if (start.status === 'error') throw new Error(start.error || 'Compatible playback is unavailable.');
       for(let attempt=0;attempt<1200;attempt++){
         if(token!==restoreToken.current)return;
         if(start.status==='error')throw new Error(start.error||'Compatible playback failed.');
         if(start.status==='ready'&&(start.complete||(start.bufferedUntil??0)>=position+6)){
+          windowStartRef.current=startTime;
           await attachHls(start.playlist,requestedStream,position,resumePlayback);
           return;
         }
         await new Promise((resolve)=>window.setTimeout(resolve,250));
         if(token!==restoreToken.current)return;
-        start=await api.transcodeStatus(item.id,audioStream);
+        start=await api.transcodeStatus(item.id,audioStream,startTime);
       }
       throw new Error('Compatible playback did not become ready.');
     } catch (reason) {
@@ -147,5 +152,6 @@ export function useHlsFallback(item: MediaItem, videoRef: RefObject<HTMLVideoEle
     stopCurrent();variantRef.current=null;setState('idle');setActiveAudioStream(null);
   },[setState,stopCurrent]);
 
-  return { fallback, error, startFallback, activeAudioStream, release };
+  const needsSeek=(position:number)=>stateRef.current==='starting'||(stateRef.current==='active'&&Boolean(videoRef.current)&&needsSeekWindow(position,windowStartRef.current,videoRef.current!.seekable));
+  return { fallback, error, startFallback, activeAudioStream, release,needsSeek };
 }

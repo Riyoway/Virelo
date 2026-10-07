@@ -65,3 +65,25 @@ test('failed conversion jobs keep reporting an error instead of polling forever'
     assert.equal(adaptiveTranscodeStatus(root,902,undefined,qualities).status,'error');
   }finally{stopAllTranscodes();await rm(root,{recursive:true,force:true});}
 });
+
+test('completed seek caches report absolute coverage and do not masquerade as the full film',async()=>{
+  const root=await mkdtemp(join(tmpdir(),'virelo-seek-status-'));
+  const qualities=[{height:360,label:'360p',bitrate:800000}];
+  try{
+    for(const variant of ['audio-1','adaptive-audio-1/360']){
+      const dir=join(root,'cache','hls','3','seek','2844',variant);
+      await mkdir(dir,{recursive:true});
+      await writeFile(join(dir,'segment-00000.ts'),'segment');
+      await writeFile(join(dir,'index.m3u8'),'#EXTM3U\n#EXTINF:8,\nsegment-00000.ts\n#EXT-X-ENDLIST\n');
+    }
+    await writeFile(join(root,'cache','hls','3','seek','2844','adaptive-audio-1','master.m3u8'),'#EXTM3U\n');
+    const compatible=transcodeStatus(root,3,1,2844),adaptive=adaptiveTranscodeStatus(root,3,1,qualities,2844);
+    for(const status of [compatible,adaptive]){
+      assert.equal(status.status,'ready');assert.equal(status.startTime,2844);
+      assert.equal(status.bufferedUntil,2852);assert.equal(status.complete,true);
+      assert.ok(status.playlist.includes('/seek/2844/'));
+    }
+    assert.equal(transcodeStatus(root,3,1).status,'idle');
+    assert.equal(adaptiveTranscodeStatus(root,3,1,qualities).status,'idle');
+  }finally{await rm(root,{recursive:true,force:true});}
+});

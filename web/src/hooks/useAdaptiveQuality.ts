@@ -1,5 +1,6 @@
 import { playVideo } from '../utils/media-playback';
 import { boundedQualityLevel } from '../utils/playback-quality';
+import { needsSeekWindow } from '../utils/playback-seek';
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { api, type QualityTranscodeState } from '../api';
 import type { MediaItem, PlaybackQuality } from '../types';
@@ -15,6 +16,7 @@ export function useAdaptiveQuality(item:MediaItem,videoRef:RefObject<HTMLVideoEl
   const restoreCleanupRef=useRef<(()=>void)|null>(null);
   const variantsRef=useRef<QualityTranscodeState['variants']>([]);
   const selectedRef=useRef<number|null>(null);
+  const windowStartRef=useRef(0);
   const playbackBlocked=useRef(false);
   const [state,setState]=useState<AdaptiveState>('idle');
   const [error,setError]=useState('');
@@ -33,6 +35,7 @@ export function useAdaptiveQuality(item:MediaItem,videoRef:RefObject<HTMLVideoEl
     requestToken.current++;
     destroy();
     variantsRef.current=[];
+    windowStartRef.current=0;
     selectedRef.current=null;
     playbackBlocked.current=false;
     setState('idle');
@@ -60,6 +63,7 @@ export function useAdaptiveQuality(item:MediaItem,videoRef:RefObject<HTMLVideoEl
     const previousSource=video.currentSrc||video.src;
     if(sourceTransition)sourceTransition.current=true;
     variantsRef.current=result.variants;
+    windowStartRef.current=result.startTime??0;
     setQualityOptions(result.variants);
     destroy();
     releasePreviousSource?.();
@@ -186,7 +190,8 @@ export function useAdaptiveQuality(item:MediaItem,videoRef:RefObject<HTMLVideoEl
     setState('starting');
     setError('');
     try{
-      let result=await api.startQualityTranscode(item.id,audioStream);
+      let result=await api.startQualityTranscode(item.id,audioStream,resumeAt);
+      const startTime=result.startTime??0;
       if(result.status==='error')throw new Error(result.error||'Adaptive playback could not start.');
       for(let attempt=0;attempt<600;attempt++){
         if(token!==requestToken.current)return false;
@@ -196,7 +201,7 @@ export function useAdaptiveQuality(item:MediaItem,videoRef:RefObject<HTMLVideoEl
         }
         await new Promise((resolve)=>window.setTimeout(resolve,250));
         if(token!==requestToken.current)return false;
-        result=await api.qualityTranscodeStatus(item.id,audioStream);
+        result=await api.qualityTranscodeStatus(item.id,audioStream,startTime);
         if(result.status==='error')throw new Error(result.error||'Adaptive playback failed.');
       }
       throw new Error('Adaptive playback did not become ready in time.');
@@ -259,5 +264,6 @@ export function useAdaptiveQuality(item:MediaItem,videoRef:RefObject<HTMLVideoEl
     setQualityOptions([]);setActiveQuality(null);setState('idle');setError('');
   },[destroy]);
 
-  return {state,error,start,selectedQuality,activeQuality,qualityOptions,setQuality,destroy,release,playbackBlocked};
+  const needsSeek=(position:number)=>state==='starting'||(state==='active'&&Boolean(videoRef.current)&&needsSeekWindow(position,windowStartRef.current,videoRef.current!.seekable));
+  return {state,error,start,selectedQuality,activeQuality,qualityOptions,setQuality,destroy,release,playbackBlocked,needsSeek};
 }

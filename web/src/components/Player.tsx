@@ -54,8 +54,12 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
   const videoFallbackRequested = useRef(false);
   const qualityRequested = useRef(true);
   const autoBufferTimer = useRef<number|null>(null);
-  const { fallback, error, startFallback, release:releaseFallback } = useHlsFallback(item, videoRef, wantsPlayback, sourceTransition);
-  const {state:qualityState,error:qualityError,start:startQuality,selectedQuality,activeQuality,qualityOptions,setQuality,playbackBlocked,release:releaseQuality}=useAdaptiveQuality(item,videoRef,releaseFallback,wantsPlayback,sourceTransition);
+  const seekTarget=useRef<number|null>(null);
+  const seekTimer=useRef<number|null>(null);
+  const seekToken=useRef(0);
+  const [seekingPosition,setSeekingPosition]=useState<number|null>(null);
+  const { fallback, error, startFallback, release:releaseFallback,needsSeek:needsFallbackSeek } = useHlsFallback(item, videoRef, wantsPlayback, sourceTransition);
+  const {state:qualityState,error:qualityError,start:startQuality,selectedQuality,activeQuality,qualityOptions,setQuality,playbackBlocked,release:releaseQuality,needsSeek:needsQualitySeek}=useAdaptiveQuality(item,videoRef,releaseFallback,wantsPlayback,sourceTransition);
   const [qualitySelectionError,setQualitySelectionError] = useState('');
   const [playbackInfo,setPlaybackInfo] = useState<PlaybackInfo|null>(null);
   const [selectedAudio,setSelectedAudio] = useState<number|null>(null);
@@ -95,6 +99,11 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
 
   useEffect(()=>{
     sourceTransition.current=true;
+    seekToken.current++;
+    seekTarget.current=null;
+    setSeekingPosition(null);
+    if(seekTimer.current!==null)window.clearTimeout(seekTimer.current);
+    seekTimer.current=null;
     wantsPlayback.current=Boolean(autoPlay);
     setPlayRequested(Boolean(autoPlay));
     playbackItemId.current=item.id;
@@ -294,6 +303,8 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
   useEffect(()=>()=>{
     if(controlsTimer.current!==null)window.clearTimeout(controlsTimer.current);
     if(autoBufferTimer.current!==null)window.clearTimeout(autoBufferTimer.current);
+    if(seekTimer.current!==null)window.clearTimeout(seekTimer.current);
+    seekToken.current++;
   },[]);
 
   useEffect(()=>{
@@ -344,6 +355,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
   function syncExternalAudio(play=false,targetTime?:number){
     const video=videoRef.current;const audio=audioRef.current;
     if(!video||!audio||!externalAudioUrl||background.audioIsClock())return;
+    if(seekTarget.current!==null&&Math.abs(video.currentTime-seekTarget.current)>.65)return;
     const position=targetTime??video.currentTime;
     if(Number.isFinite(position)&&(!Number.isFinite(audio.currentTime)||Math.abs(audio.currentTime-position)>.2)){
       try{audio.currentTime=position;}catch{/* wait for metadata before seeking */}
@@ -414,7 +426,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
   function toggle(){
     const video=videoRef.current;
     if(!video)return;
-    const preparingPlayback=audioPreparing||qualityState==='starting'||fallback==='starting';
+    const preparingPlayback=seekingPosition!==null||audioPreparing||qualityState==='starting'||fallback==='starting';
     const next=preparingPlayback||background.suspended.current?!wantsPlayback.current:video.paused;
     wantsPlayback.current=next;
     setPlayRequested(next);
@@ -422,8 +434,45 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
     else {pausePlayback();setBuffering(false);}
   }
   function handleVideoClick(){if(usesTouchControls()&&!controlsVisible){revealControls();return;}toggle();revealControls();}
-  function seek(value:number){const v=videoRef.current;if(!v)return;v.currentTime=value;if(audioRef.current&&externalAudioUrl){try{audioRef.current.currentTime=value;}catch{audioResumeAt.current=value;}}setCurrent(value);}
-  function seekBy(seconds:number){const v=videoRef.current;if(!v)return;seek(Math.max(0,Math.min(v.duration || duration,current + seconds)));}
+  function seek(value:number){
+    const video=videoRef.current;
+    if(!video||!Number.isFinite(value))return;
+    const position=Math.max(0,Math.min(value,Math.max(0,fullDuration(item.duration,duration,video.duration)-.2)));
+    const token=++seekToken.current;
+    if(seekTimer.current!==null)window.clearTimeout(seekTimer.current);
+    seekTimer.current=null;
+    seekTarget.current=position;
+    setSeekingPosition(position);
+    setCurrent(position);
+    initialResumeItem.current=item.id;
+    background.suspended.current=false;
+    if(autoBufferTimer.current!==null)window.clearTimeout(autoBufferTimer.current);
+    autoBufferTimer.current=null;
+    const qualitySeek=needsQualitySeek(position),fallbackSeek=needsFallbackSeek(position);
+    if(qualitySeek||fallbackSeek){
+      sourceTransition.current=true;
+      video.pause();audioRef.current?.pause();setBuffering(false);
+      // Dragging across the range must not spawn an encoder for every pixel.
+      seekTimer.current=window.setTimeout(()=>{
+        seekTimer.current=null;
+        if(token!==seekToken.current)return;
+        if(qualitySeek)void startQuality(selectedAudio??undefined,position,wantsPlayback.current);
+        else void startFallback(selectedAudio??undefined,position,wantsPlayback.current,true);
+      },180);
+      return;
+    }
+    video.currentTime=position;
+    if(audioRef.current&&externalAudioUrl){
+      audioResumeAt.current=position;
+      try{audioRef.current.currentTime=position;audioResumeAt.current=null;}catch{/* apply when metadata arrives */}
+    }
+  }
+  function acceptSeekPosition(video:HTMLVideoElement){
+    if(seekTarget.current===null)return true;
+    if(video.seeking||sourceTransition.current||Math.abs(video.currentTime-seekTarget.current)>.65)return false;
+    seekTarget.current=null;setSeekingPosition(null);return true;
+  }
+  function seekBy(seconds:number){seek(Math.max(0,Math.min(fullDuration(item.duration,duration), (seekTarget.current??current)+seconds)));}
   function toggleMute(){setMuted((value)=>!value);}
   function setVol(value:number){setMuted(false);setVolume(value);}
   async function fullscreen(){const container=containerRef.current;const video=videoRef.current;if(!container||!video)return;await toggleFullscreen(container,video);}
@@ -550,7 +599,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
     void startFallback(selectedAudio??undefined,video?.currentTime||current,shouldPlay);
   }
 
-  const pauseAction=playing||(playRequested&&(audioPreparing||qualityState==='starting'||fallback==='starting'));
+  const pauseAction=playing||(playRequested&&(seekingPosition!==null||audioPreparing||qualityState==='starting'||fallback==='starting'));
   return <div className={`player${queue?.length?' has-queue':''}${controlsVisible?' controls-visible':''}`} ref={containerRef} tabIndex={0} aria-label={item.title+' player'}
     onContextMenu={event=>{event.preventDefault();event.stopPropagation();revealControls();setContextPosition({x:event.clientX,y:event.clientY});}}
     onDoubleClick={()=>void fullscreen()} onPointerMove={(event)=>{if(event.pointerType==='mouse'){revealControls();scheduleControlsHide();}}} onPointerDown={revealControls} onPointerUp={scheduleControlsHide} onPointerCancel={scheduleControlsHide} onPointerLeave={scheduleControlsHide} onFocusCapture={revealControls} onBlurCapture={scheduleControlsHide}
@@ -569,7 +618,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
       onPlaying={handlePlaying}
       onWaiting={handleWaiting}
       onSeeking={()=>audioRef.current?.pause()}
-      onSeeked={()=>syncExternalAudio(!videoRef.current?.paused)}
+      onSeeked={(event)=>{if(acceptSeekPosition(event.currentTarget))syncExternalAudio(!event.currentTarget.paused);}}
       onPause={(e)=>{if(background.handlePause(e.currentTarget)){requestExternalAudioPlayback();return;}if(!sourceTransition.current){wantsPlayback.current=false;setPlayRequested(false);}audioRef.current?.pause();if(audioRetryTimer.current!==null)window.clearTimeout(audioRetryTimer.current);audioRetryTimer.current=null;audioRetryCount.current=0;setPlaying(false);setBuffering(false);if(autoBufferTimer.current!==null)window.clearTimeout(autoBufferTimer.current);autoBufferTimer.current=null;revealControls();const v=e.currentTarget;void api.progress(playbackItemId.current,v.currentTime,fullDuration(v.duration,item.duration,duration));}}
       onLoadedMetadata={(e)=>{
         const v=e.currentTarget;playbackItemId.current=item.id;setDuration(fullDuration(v.duration,item.duration));
@@ -586,7 +635,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
       }}
       onTimeUpdate={(e)=>{
         if(background.audioIsClock()&&externalAudioUrl)return;
-        const v=e.currentTarget;setCurrent(v.currentTime);syncExternalAudio(!v.paused);
+        const v=e.currentTarget;if(!acceptSeekPosition(v))return;setCurrent(v.currentTime);syncExternalAudio(!v.paused);
         if(Math.abs(v.currentTime-lastProgress.current)>5){lastProgress.current=v.currentTime;void api.progress(playbackItemId.current,v.currentTime,fullDuration(v.duration,item.duration,duration));}
       }}
       onRateChange={()=>syncExternalAudio(false)}
@@ -603,9 +652,9 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
     </video>
     <audio ref={audioRef} preload="auto" onTimeUpdate={event=>reportBackgroundAudio(event.currentTarget)}/>
     <DraggableCaption key={`${item.id}:${selectedSubtitle}`} text={activeCaption} controlsVisible={controlsVisible} containerRef={containerRef} onDraggingChange={(dragging)=>{if(dragging)revealControls();else window.setTimeout(scheduleControlsHide,0);}}/>
-    {qualityState==='starting'&&playRequested&&(!playing||buffering)&&<div className="player-status"><SpinnerGap className="spin"/><strong>{selectedQuality===null?'Buffering…':`Switching to ${qualityLabel(selectedQuality)}…`}</strong></div>}
+    {qualityState==='starting'&&playRequested&&(!playing||buffering)&&<div className="player-status"><SpinnerGap className="spin"/><strong>{seekingPosition!==null?'Seeking…':selectedQuality===null?'Buffering…':`Switching to ${qualityLabel(selectedQuality)}…`}</strong></div>}
     {audioPreparing&&playRequested&&<div className="player-status"><SpinnerGap className="spin"/><strong>Preparing audio…</strong><span>Only the audio track is being converted. The cached result will be reused.</span></div>}
-    {fallback==='starting'&&playRequested&&(!playing||buffering) && <div className="player-status"><SpinnerGap className="spin"/><strong>{playbackInfo?.requiresVideoTranscode?'Preparing video…':'Preparing audio…'}</strong></div>}
+    {fallback==='starting'&&playRequested&&(!playing||buffering) && <div className="player-status"><SpinnerGap className="spin"/><strong>{seekingPosition!==null?'Seeking…':playbackInfo?.requiresVideoTranscode?'Preparing video…':'Preparing audio…'}</strong></div>}
     {(qualitySelectionError||fallback==='error'||audioError||(qualityState==='error'&&qualityRequested.current&&!playing)) && <div className="player-status error"><strong>Playback unavailable</strong><span>{qualitySelectionError||audioError||error||qualityError}{playbackBlocked.current&&!qualitySelectionError?' Choose another quality to continue; your quality limit has been kept.':''}</span></div>}
     <div className="player-gradient"/>
     <div className="player-controls" onDoubleClick={event=>event.stopPropagation()}>

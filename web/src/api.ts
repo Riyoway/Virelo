@@ -7,6 +7,7 @@ export interface QualityTranscodeState {
   variants:Array<PlaybackQuality&{url:string}>;
   bufferedUntil?:number;
   complete?:boolean;
+  startTime?:number;
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -44,10 +45,10 @@ export const api = {
   clearAllMetadata: () => request<{cleared:number}>('/api/metadata', { method:'DELETE' }),
   refreshMetadata: (id:number) => request<MediaItem>(`/api/media/${id}/metadata/refresh`, { method:'POST' }),
   playbackInfo: (id:number) => request<PlaybackInfo>(`/api/media/${id}/playback`),
-  startTranscode: (id:number,audioStream?:number) => request<{status:string;error?:string;playlist:string;bufferedUntil?:number;complete?:boolean}>(`/api/media/${id}/transcode/start`, {method:'POST',body:JSON.stringify(audioStream===undefined?{}:{audioStream})}),
-  transcodeStatus: (id:number,audioStream?:number) => request<{status:string;error?:string;playlist:string;bufferedUntil?:number;complete?:boolean}>(withQuery(`/api/media/${id}/transcode/status`,{audioStream})),
-  startQualityTranscode: (id:number,audioStream?:number) => request<QualityTranscodeState>(`/api/media/${id}/quality/start`,{method:'POST',body:JSON.stringify(audioStream===undefined?{}:{audioStream})}),
-  qualityTranscodeStatus: (id:number,audioStream?:number) => request<QualityTranscodeState>(withQuery(`/api/media/${id}/quality/status`,{audioStream})),
+  startTranscode: (id:number,audioStream?:number,startTime?:number) => request<{status:string;error?:string;playlist:string;bufferedUntil?:number;complete?:boolean;startTime?:number}>(`/api/media/${id}/transcode/start`, {method:'POST',body:JSON.stringify({audioStream,startTime})}),
+  transcodeStatus: (id:number,audioStream?:number,startTime?:number) => request<{status:string;error?:string;playlist:string;bufferedUntil?:number;complete?:boolean;startTime?:number}>(withQuery(`/api/media/${id}/transcode/status`,{audioStream,startTime})),
+  startQualityTranscode: (id:number,audioStream?:number,startTime?:number) => request<QualityTranscodeState>(`/api/media/${id}/quality/start`,{method:'POST',body:JSON.stringify({audioStream,startTime})}),
+  qualityTranscodeStatus: (id:number,audioStream?:number,startTime?:number) => request<QualityTranscodeState>(withQuery(`/api/media/${id}/quality/status`,{audioStream,startTime})),
   startAudioTranscode: (id:number,audioStream:number) => request<{status:string;error?:string;url:string}>(`/api/media/${id}/audio/start`, {method:'POST',body:JSON.stringify({audioStream})}),
   audioTranscodeStatus: (id:number,audioStream:number) => request<{status:string;error?:string;url:string}>(withQuery(`/api/media/${id}/audio/status`,{audioStream})),
   subtitleUrl: (id:number,stream:number) => `/api/media/${id}/subtitles/${stream}`,

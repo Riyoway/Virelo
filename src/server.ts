@@ -2,7 +2,7 @@ import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import chokidar, { type FSWatcher } from 'chokidar';
 import { createReadStream, existsSync } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { stat, readFile } from 'node:fs/promises';
 import { basename, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { VireloDB } from './db.js';
@@ -13,6 +13,7 @@ import { hasFfmpeg, hasFfprobe, playbackQualities, probePlaybackInfo } from './f
 import { adaptiveTranscodeStatus, audioTranscodeStatus, extractSubtitleVtt, startAdaptiveTranscode, startAudioTranscode, startHlsTranscode, transcodeStatus, stopAllTranscodes } from './transcode.js';
 import type { AppSettings, MediaKind, ScanStatus, SortKey } from './types.js';
 import { VIRELO_VERSION } from './version.js';
+import { seekWindowPlaylist } from './hls-seek.js';
 
 const SORT_KEYS: SortKey[] = ['title', 'newest', 'oldest', 'year', 'duration', 'random'];
 
@@ -240,37 +241,45 @@ export async function createVireloServer(config: RuntimeConfig) {
     if (!info) return reply.code(503).send({ error: 'ffprobe is required to inspect audio and subtitle tracks.' });
     return info;
   });
-  app.post<{ Params: { id: string }; Body: { audioStream?: number } }>('/api/media/:id/transcode/start', async (request, reply) => {
+  app.post<{ Params: { id: string }; Body: { audioStream?: number; startTime?: number } }>('/api/media/:id/transcode/start', async (request, reply) => {
     const media = db.getMedia(Number(request.params.id));
     if (!media || !existsSync(media.path)) return reply.code(404).send({ error: 'Media file not found' });
     const audioStream = request.body?.audioStream;
+    const startTime=request.body?.startTime;
+    if(startTime!==undefined&&(!Number.isFinite(startTime)||startTime<0||(media.duration&&startTime>=media.duration)))return reply.code(400).send({error:'Invalid seek position.'});
     const info=await probePlaybackInfo(media.path);
     if (audioStream !== undefined) {
       if (!Number.isInteger(audioStream) || audioStream < 0) return reply.code(400).send({ error: 'Invalid audio stream.' });
       if (!info?.audioTracks.some((track) => track.index === audioStream)) return reply.code(400).send({ error: 'Audio stream not found.' });
     }
-    return startHlsTranscode(config.dataDir, media.id, media.path, { audioStream, copyVideo:info?.videoCodec==='h264' });
+    return startHlsTranscode(config.dataDir, media.id, media.path, { audioStream, copyVideo:info?.videoCodec==='h264',startTime });
   });
-  app.get<{ Params: { id: string }; Querystring: { audioStream?: string } }>('/api/media/:id/transcode/status', async (request, reply) => {
+  app.get<{ Params: { id: string }; Querystring: { audioStream?: string; startTime?: string } }>('/api/media/:id/transcode/status', async (request, reply) => {
     const audioStream = request.query.audioStream === undefined ? undefined : Number(request.query.audioStream);
     if (audioStream !== undefined && (!Number.isInteger(audioStream) || audioStream < 0)) return reply.code(400).send({ error: 'Invalid audio stream.' });
-    return transcodeStatus(config.dataDir, Number(request.params.id), audioStream);
+    const startTime=Number(request.query.startTime??0);
+    if(!Number.isSafeInteger(startTime)||startTime<0)return reply.code(400).send({error:'Invalid seek position.'});
+    return transcodeStatus(config.dataDir, Number(request.params.id), audioStream,startTime);
   });
-  app.post<{ Params: { id: string }; Body: { audioStream?: number } }>('/api/media/:id/quality/start', async (request, reply) => {
+  app.post<{ Params: { id: string }; Body: { audioStream?: number; startTime?: number } }>('/api/media/:id/quality/start', async (request, reply) => {
     const media=db.getMedia(Number(request.params.id));
     if(!media||!existsSync(media.path))return reply.code(404).send({error:'Media file not found'});
+    const startTime=request.body?.startTime;
+    if(startTime!==undefined&&(!Number.isFinite(startTime)||startTime<0||(media.duration&&startTime>=media.duration)))return reply.code(400).send({error:'Invalid seek position.'});
     const info=await probePlaybackInfo(media.path);
     if(!info||!info.width||!info.height)return reply.code(503).send({error:'Video resolution could not be inspected.'});
     const audioStream=request.body?.audioStream;
     if(audioStream!==undefined&&(!Number.isInteger(audioStream)||!info.audioTracks.some((track)=>track.index===audioStream)))return reply.code(400).send({error:'Audio stream not found.'});
-    return startAdaptiveTranscode(config.dataDir,media.id,media.path,{audioStream,hasAudio:info.audioTracks.length>0,sourceWidth:info.width,sourceHeight:info.height,qualities:info.qualityOptions});
+    return startAdaptiveTranscode(config.dataDir,media.id,media.path,{audioStream,hasAudio:info.audioTracks.length>0,sourceWidth:info.width,sourceHeight:info.height,qualities:info.qualityOptions,startTime});
   });
-  app.get<{ Params: { id: string }; Querystring: { audioStream?: string } }>('/api/media/:id/quality/status', async (request, reply) => {
+  app.get<{ Params: { id: string }; Querystring: { audioStream?: string; startTime?: string } }>('/api/media/:id/quality/status', async (request, reply) => {
     const media=db.getMedia(Number(request.params.id));
     if(!media||!existsSync(media.path))return reply.code(404).send({error:'Media file not found'});
     const audioStream=request.query.audioStream===undefined?undefined:Number(request.query.audioStream);
     if(audioStream!==undefined&&(!Number.isInteger(audioStream)||audioStream<0))return reply.code(400).send({error:'Invalid audio stream.'});
-    return adaptiveTranscodeStatus(config.dataDir,media.id,audioStream,playbackQualities(media.width,media.height));
+    const startTime=Number(request.query.startTime??0);
+    if(!Number.isSafeInteger(startTime)||startTime<0)return reply.code(400).send({error:'Invalid seek position.'});
+    return adaptiveTranscodeStatus(config.dataDir,media.id,audioStream,playbackQualities(media.width,media.height),startTime);
   });
   app.post<{ Params: { id: string }; Body: { audioStream?: number } }>('/api/media/:id/audio/start', async (request, reply) => {
     const media = db.getMedia(Number(request.params.id));
@@ -381,6 +390,17 @@ export async function createVireloServer(config: RuntimeConfig) {
     return reply.send(createReadStream(media.path, { start, end }));
   });
 
+  // Window playlists keep the absolute movie timeline. Real segments remain
+  // ordinary static files; only the unencoded prefix is marked as an HLS GAP.
+  for(const url of ['/hls/:id/seek/:startTime/:variant/index.m3u8','/hls/:id/seek/:startTime/:variant/:height/index.m3u8']){
+    app.get<{Params:{id:string;startTime:string;variant:string;height?:string}}>(url,async(request,reply)=>{
+      const {id,startTime,variant,height}=request.params;
+      if(!/^\d+$/.test(id)||!/^\d+$/.test(startTime)||!Number.isSafeInteger(Number(startTime))||! /^(default|audio-\d+|adaptive-default|adaptive-audio-\d+)$/.test(variant)||(height!==undefined&&!/^\d+$/.test(height)))return reply.code(400).send({error:'Invalid seek playlist.'});
+      const path=resolve(config.dataDir,'cache','hls',id,'seek',startTime,variant,...(height?[height]:[]),'index.m3u8');
+      try{return reply.type('application/vnd.apple.mpegurl').header('Cache-Control','no-store').send(seekWindowPlaylist(await readFile(path,'utf8'),Number(startTime)));}
+      catch{return reply.code(404).send({error:'Seek playlist is not ready.'});}
+    });
+  }
   await app.register(fastifyStatic, { root: resolve(config.dataDir, 'cache', 'hls'), prefix: '/hls/', wildcard: true, decorateReply: false, cacheControl: false });
   await app.register(fastifyStatic, { root: resolve(config.dataDir, 'cache', 'audio'), prefix: '/audio/', wildcard: true, decorateReply: false, cacheControl: false });
   await app.register(fastifyStatic, { root: webRoot, prefix: '/', wildcard: false, decorateReply: true });

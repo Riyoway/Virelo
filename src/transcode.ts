@@ -2,6 +2,7 @@ import { mkdirSync, existsSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { hasFfmpeg, type PlaybackQuality } from './ffmpeg.js';
+import { seekWindowStart } from './hls-seek.js';
 
 export interface TranscodeState {
   status: 'idle'|'starting'|'running'|'ready'|'error';
@@ -9,11 +10,13 @@ export interface TranscodeState {
   playlist: string;
   bufferedUntil?: number;
   complete?: boolean;
+  startTime?: number;
 }
 
 export interface TranscodeOptions {
   audioStream?: number;
   copyVideo?: boolean;
+  startTime?: number;
 }
 
 export interface AudioTranscodeState {
@@ -29,6 +32,7 @@ export interface AdaptiveTranscodeState {
   variants: Array<PlaybackQuality & { url: string }>;
   bufferedUntil?: number;
   complete?: boolean;
+  startTime?: number;
 }
 
 export interface AdaptiveTranscodeOptions {
@@ -37,6 +41,7 @@ export interface AdaptiveTranscodeOptions {
   sourceWidth: number;
   sourceHeight: number;
   qualities: PlaybackQuality[];
+  startTime?: number;
 }
 
 const jobs = new Map<string, { child: ChildProcess; state: TranscodeState }>();
@@ -45,21 +50,23 @@ const adaptiveJobs = new Map<string, { child: ChildProcess; state: AdaptiveTrans
 
 export function hlsDir(dataDir:string,id:number){return join(dataDir,'cache','hls',String(id));}
 function variantName(audioStream?:number){return Number.isInteger(audioStream) ? `audio-${audioStream}` : 'default';}
-function jobKey(id:number,audioStream?:number){return `${id}:${variantName(audioStream)}`;}
-export function hlsVariantDir(dataDir:string,id:number,audioStream?:number){return join(hlsDir(dataDir,id),variantName(audioStream));}
-export function hlsPlaylist(dataDir:string,id:number,audioStream?:number){return join(hlsVariantDir(dataDir,id,audioStream),'index.m3u8');}
-function playlistUrl(id:number,audioStream?:number){return `/hls/${id}/${variantName(audioStream)}/index.m3u8`;}
+function windowDir(dataDir:string,id:number,startTime=0){return startTime>0?join(hlsDir(dataDir,id),'seek',String(startTime)):hlsDir(dataDir,id);}
+function windowUrl(id:number,startTime=0){return startTime>0?`/hls/${id}/seek/${startTime}`:`/hls/${id}`;}
+function jobKey(id:number,audioStream?:number,startTime=0){return `${id}:${variantName(audioStream)}:${startTime}`;}
+export function hlsVariantDir(dataDir:string,id:number,audioStream?:number,startTime=0){return join(windowDir(dataDir,id,startTime),variantName(audioStream));}
+export function hlsPlaylist(dataDir:string,id:number,audioStream?:number,startTime=0){return join(hlsVariantDir(dataDir,id,audioStream,startTime),'index.m3u8');}
+function playlistUrl(id:number,audioStream?:number,startTime=0){return `${windowUrl(id,startTime)}/${variantName(audioStream)}/index.m3u8`;}
 function audioDir(dataDir:string,id:number){return join(dataDir,'cache','audio',String(id));}
 function audioVariantDir(dataDir:string,id:number,audioStream:number){return join(audioDir(dataDir,id),`stream-${audioStream}`);}
 function audioPlaylist(dataDir:string,id:number,audioStream:number){return join(audioVariantDir(dataDir,id,audioStream),'index.m3u8');}
 function audioUrl(id:number,audioStream:number){return `/audio/${id}/stream-${audioStream}/index.m3u8`;}
 function adaptiveName(audioStream?:number){return Number.isInteger(audioStream)?`adaptive-audio-${audioStream}`:'adaptive-default';}
-function adaptiveKey(id:number,audioStream?:number){return `${id}:${adaptiveName(audioStream)}`;}
-function adaptiveDir(dataDir:string,id:number,audioStream?:number){return join(hlsDir(dataDir,id),adaptiveName(audioStream));}
-function adaptivePlaylist(dataDir:string,id:number,audioStream?:number){return join(adaptiveDir(dataDir,id,audioStream),'master.m3u8');}
-function adaptiveUrl(id:number,audioStream?:number){return `/hls/${id}/${adaptiveName(audioStream)}/master.m3u8`;}
-function adaptiveVariants(id:number,audioStream:number|undefined,qualities:PlaybackQuality[]){
-  return qualities.map((quality)=>({...quality,url:`/hls/${id}/${adaptiveName(audioStream)}/${quality.height}/index.m3u8`}));
+function adaptiveKey(id:number,audioStream?:number,startTime=0){return `${id}:${adaptiveName(audioStream)}:${startTime}`;}
+function adaptiveDir(dataDir:string,id:number,audioStream?:number,startTime=0){return join(windowDir(dataDir,id,startTime),adaptiveName(audioStream));}
+function adaptivePlaylist(dataDir:string,id:number,audioStream?:number,startTime=0){return join(adaptiveDir(dataDir,id,audioStream,startTime),'master.m3u8');}
+function adaptiveUrl(id:number,audioStream?:number,startTime=0){return `${windowUrl(id,startTime)}/${adaptiveName(audioStream)}/master.m3u8`;}
+function adaptiveVariants(id:number,audioStream:number|undefined,qualities:PlaybackQuality[],startTime=0){
+  return qualities.map((quality)=>({...quality,url:`${windowUrl(id,startTime)}/${adaptiveName(audioStream)}/${quality.height}/index.m3u8`}));
 }
 
 // FFmpeg publishes playlists atomically. Only advertise media whose segment files
@@ -82,34 +89,38 @@ function playlistProgress(playlist:string){
   }catch{return null;}
 }
 
-export function adaptiveTranscodeStatus(dataDir:string,id:number,audioStream:number|undefined,qualities:PlaybackQuality[]):AdaptiveTranscodeState {
-  const running=adaptiveJobs.get(adaptiveKey(id,audioStream))?.state;
-  const variants=adaptiveVariants(id,audioStream,qualities);
+export function adaptiveTranscodeStatus(dataDir:string,id:number,audioStream:number|undefined,qualities:PlaybackQuality[],startTime=0):AdaptiveTranscodeState {
+  startTime=seekWindowStart(startTime);
+  const running=adaptiveJobs.get(adaptiveKey(id,audioStream,startTime))?.state;
+  const variants=adaptiveVariants(id,audioStream,qualities,startTime);
   if(running?.status==='error')return running;
-  const progress=qualities.map((quality)=>playlistProgress(join(adaptiveDir(dataDir,id,audioStream),String(quality.height),'index.m3u8')));
-  if(progress.length&&progress.every((entry)=>entry!==null)&&existsSync(adaptivePlaylist(dataDir,id,audioStream))){
-    const bufferedUntil=Math.min(...progress.map((entry)=>entry!.duration));
+  const progress=qualities.map((quality)=>playlistProgress(join(adaptiveDir(dataDir,id,audioStream,startTime),String(quality.height),'index.m3u8')));
+  if(progress.length&&progress.every((entry)=>entry!==null)&&existsSync(adaptivePlaylist(dataDir,id,audioStream,startTime))){
+    const bufferedUntil=startTime+Math.min(...progress.map((entry)=>entry!.duration));
     const complete=progress.every((entry)=>entry!.complete);
-    if(complete||running)return {status:'ready',playlist:adaptiveUrl(id,audioStream),variants,bufferedUntil,complete};
+    if(complete||running)return {status:'ready',playlist:adaptiveUrl(id,audioStream,startTime),variants,bufferedUntil,complete,startTime};
   }
-  return running||{status:'idle',playlist:adaptiveUrl(id,audioStream),variants};
+  return running||{status:'idle',playlist:adaptiveUrl(id,audioStream,startTime),variants,startTime};
 }
 
 export async function startAdaptiveTranscode(dataDir:string,id:number,source:string,options:AdaptiveTranscodeOptions):Promise<AdaptiveTranscodeState>{
   const audioStream=Number.isInteger(options.audioStream)?options.audioStream:undefined;
   const qualities=options.qualities;
-  const existing=adaptiveTranscodeStatus(dataDir,id,audioStream,qualities);
+  const startTime=seekWindowStart(options.startTime);
+  const full=adaptiveTranscodeStatus(dataDir,id,audioStream,qualities);
+  if(full.status==='ready'&&(full.complete||(full.bufferedUntil??0)>=startTime+6))return full;
+  const existing=adaptiveTranscodeStatus(dataDir,id,audioStream,qualities,startTime);
   if(existing.status==='ready'||existing.status==='running'||existing.status==='starting')return existing;
-  const variants=adaptiveVariants(id,audioStream,qualities);
+  const variants=adaptiveVariants(id,audioStream,qualities,startTime);
   if(!qualities.length)return {status:'error',error:'Video resolution could not be detected.',playlist:adaptiveUrl(id,audioStream),variants};
   if(!(await hasFfmpeg()))return {status:'error',error:'FFmpeg is not installed or not available in PATH.',playlist:adaptiveUrl(id,audioStream),variants};
-  const dir=adaptiveDir(dataDir,id,audioStream);
+  const dir=adaptiveDir(dataDir,id,audioStream,startTime);
   rmSync(dir,{recursive:true,force:true});
   mkdirSync(dir,{recursive:true});
   for(const quality of qualities)mkdirSync(join(dir,String(quality.height)),{recursive:true});
-  const state:AdaptiveTranscodeState={status:'starting',playlist:adaptiveUrl(id,audioStream),variants};
+  const state:AdaptiveTranscodeState={status:'starting',playlist:adaptiveUrl(id,audioStream,startTime),variants,startTime};
   const audioMap=audioStream===undefined?'0:a:0?':`0:${audioStream}`;
-  const args=['-hide_banner','-loglevel','warning','-i',source];
+  const args=['-hide_banner','-loglevel','warning',...(startTime>0?['-ss',String(startTime)]:[]),'-i',source];
   for(let index=0;index<qualities.length;index++){
     args.push('-map','0:v:0');
     if(options.hasAudio)args.push('-map',audioMap);
@@ -136,44 +147,50 @@ export async function startAdaptiveTranscode(dataDir:string,id:number,source:str
   let child:ChildProcess;
   try{child=spawn(process.env.FFMPEG_PATH||'ffmpeg',args,{windowsHide:true});}
   catch(error){state.status='error';state.error=error instanceof Error?error.message:'FFmpeg could not start.';return state;}
-  const key=adaptiveKey(id,audioStream);
+  const key=adaptiveKey(id,audioStream,startTime);
   adaptiveJobs.set(key,{child,state});
   state.status='running';
   child.stderr?.on('data',(chunk)=>{const text=String(chunk).trim();if(text)state.error=text.slice(-500);});
   child.once('error',(error)=>{state.status='error';state.error=error.message;rmSync(dir,{recursive:true,force:true});});
   child.once('exit',(code)=>{
-    if(code===0&&existsSync(adaptivePlaylist(dataDir,id,audioStream))){state.status='ready';state.error=undefined;}
+    if(code===0&&existsSync(adaptivePlaylist(dataDir,id,audioStream,startTime))){state.status='ready';state.error=undefined;}
     else{state.status='error';if(!state.error)state.error=`FFmpeg exited with code ${code}`;rmSync(dir,{recursive:true,force:true});}
     if(state.status==='ready')adaptiveJobs.delete(key);
   });
   return state;
 }
 
-export function transcodeStatus(dataDir:string,id:number,audioStream?:number):TranscodeState {
-  const running=jobs.get(jobKey(id,audioStream))?.state;
+export function transcodeStatus(dataDir:string,id:number,audioStream?:number,startTime=0):TranscodeState {
+  startTime=seekWindowStart(startTime);
+  const running=jobs.get(jobKey(id,audioStream,startTime))?.state;
   if(running?.status==='error')return running;
-  const progress=playlistProgress(hlsPlaylist(dataDir,id,audioStream));
-  if(progress&&(progress.complete||(running&&progress.segments>=2)))return {status:'ready',playlist:playlistUrl(id,audioStream),bufferedUntil:progress.duration,complete:progress.complete};
-  return running || {status:'idle',playlist:playlistUrl(id,audioStream)};
+  const progress=playlistProgress(hlsPlaylist(dataDir,id,audioStream,startTime));
+  if(progress&&(progress.complete||(running&&progress.segments>=2)))return {status:'ready',playlist:playlistUrl(id,audioStream,startTime),bufferedUntil:startTime+progress.duration,complete:progress.complete,startTime};
+  return running || {status:'idle',playlist:playlistUrl(id,audioStream,startTime),startTime};
 }
 
 export async function startHlsTranscode(dataDir:string,id:number,source:string,options:TranscodeOptions={}):Promise<TranscodeState> {
   const audioStream = Number.isInteger(options.audioStream) ? options.audioStream : undefined;
-  const existing = transcodeStatus(dataDir,id,audioStream);
+  const startTime=seekWindowStart(options.startTime);
+  const full=transcodeStatus(dataDir,id,audioStream);
+  if(full.status==='ready'&&(full.complete||(full.bufferedUntil??0)>=startTime+6))return full;
+  const existing = transcodeStatus(dataDir,id,audioStream,startTime);
   if (existing.status === 'ready' || existing.status === 'running' || existing.status === 'starting') return existing;
   if (!(await hasFfmpeg())) return {status:'error',error:'FFmpeg is not installed or not available in PATH.',playlist:playlistUrl(id,audioStream)};
-  const dir = hlsVariantDir(dataDir,id,audioStream);
+  const dir = hlsVariantDir(dataDir,id,audioStream,startTime);
   rmSync(dir,{recursive:true,force:true});
   mkdirSync(dir,{recursive:true});
-  const playlist = hlsPlaylist(dataDir,id,audioStream);
-  const state:TranscodeState = {status:'starting',playlist:playlistUrl(id,audioStream)};
+  const playlist = hlsPlaylist(dataDir,id,audioStream,startTime);
+  const state:TranscodeState = {status:'starting',playlist:playlistUrl(id,audioStream,startTime),startTime};
   let child: ChildProcess;
   try {
     const audioMap = audioStream === undefined ? '0:a:0?' : `0:${audioStream}`;
     child = spawn(process.env.FFMPEG_PATH || 'ffmpeg',[
-      '-hide_banner','-loglevel','warning','-i',source,
+      '-hide_banner','-loglevel','warning',...(startTime>0?['-ss',String(startTime)]:[]),'-i',source,
       '-map','0:v:0','-map',audioMap,
-      ...(options.copyVideo?['-c:v','copy']:['-c:v','libx264','-preset','veryfast','-crf','21','-pix_fmt','yuv420p','-force_key_frames','expr:gte(t,n_forced*2)']),
+      // Stream-copy input seeking preserves preroll before the requested time.
+      // Decode a new window so its first frame/audio/subtitles share one origin.
+      ...(options.copyVideo&&startTime===0?['-c:v','copy']:['-c:v','libx264','-preset','veryfast','-crf','21','-pix_fmt','yuv420p','-force_key_frames','expr:gte(t,n_forced*2)']),
       '-c:a','aac','-b:a','192k','-ac','2',
       '-f','hls','-hls_time','2','-hls_playlist_type','event','-hls_flags','independent_segments+temp_file',
       '-hls_segment_filename',join(dir,'segment-%05d.ts'),playlist
@@ -183,7 +200,7 @@ export async function startHlsTranscode(dataDir:string,id:number,source:string,o
     state.error=error instanceof Error ? error.message : 'FFmpeg could not start.';
     return state;
   }
-  const key = jobKey(id,audioStream);
+  const key = jobKey(id,audioStream,startTime);
   jobs.set(key,{child,state});
   state.status='running';
   child.stderr?.on('data',(chunk)=>{
