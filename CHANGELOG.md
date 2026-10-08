@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.3.1 — 2026-10-09
+
+- Match route and data-loading skeletons to the real Home, library, player, detail, settings and Shorts layouts, with restrained surfaces and reduced-motion support.
+
+- Unify app, splash, favicon, social preview and PWA icons with the transparent Virelo logo; refresh asset references to avoid stale cached branding.
+
 - Replace whole-film, all-rendition conversion with on-demand six-second video/audio segments. Preserve full-duration seeking and manual quality ceilings without encoding the skipped prefix or unrequested resolutions.
 - Limit the shared playback cache to 512 MiB by default, prune legacy caches and least-recently-used files, protect active responses, limit encoders to two and cancel abandoned requests.
 
