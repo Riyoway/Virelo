@@ -26,7 +26,7 @@ export function SplashScreen({ onDone }: { onDone: () => void }) {
     <div className={`splash-screen splash-phase-${phase}`} role="status" aria-label="Virelo">
       <div className="splash-content">
         <div className="splash-logo" aria-hidden="true">
-          <img src="/virelo-icon.png" alt="" />
+          <img src="/virelo-icon.png?v=transparent-1" alt="" />
         </div>
         <div className="splash-wordmark" aria-hidden="true">Virelo</div>
       </div>

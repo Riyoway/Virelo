@@ -1,4 +1,4 @@
-const CACHE_NAME = 'virelo-shell-v1';
+const CACHE_NAME = 'virelo-shell-transparent-1';
 
 self.addEventListener('install', (event) => {
   event.waitUntil(self.skipWaiting());
