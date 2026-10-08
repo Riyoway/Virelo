@@ -104,7 +104,7 @@ export function LibraryView() {
       </FolderRow>}
     </nav>
 
-    {mediaQ.isLoading ? <div className="media-grid">{Array.from({length:12},(_,i)=><div className="skeleton grid-skeleton" key={i}/>)}</div> :
+    {mediaQ.isLoading ? <div className="media-grid" role="status" aria-label="Loading videos" aria-busy="true">{Array.from({length:12},(_,i)=><div className="skeleton grid-skeleton" key={i}/>)}</div> :
       media.length ? <div className="media-grid">{media.map(item=><MediaCard key={item.id} item={item}/>)}</div> : <div className="search-empty"><MagnifyingGlass/><h2>No matches</h2><p>Try another title, folder or file name.</p></div>}
   </div>;
 }

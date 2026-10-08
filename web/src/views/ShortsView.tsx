@@ -1,3 +1,4 @@
+import { PageSkeleton } from '../components/PageSkeleton';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { useNavigate, useSearch } from '@tanstack/react-router';
@@ -87,7 +88,7 @@ function ShortsFeedView({ startId }: { startId?: number }) {
   }, [goTo, activeIndex, items.length]);
 
   if (query.isError && items.length === 0) return <div className="shorts-empty"><p>Shorts could not be loaded.</p><button onClick={() => void query.refetch()}>Try again</button></div>;
-  if (query.isLoading) return <div className="shorts-loading skeleton" />;
+  if (query.isLoading) return <PageSkeleton kind="shorts" />;
   if (startId !== undefined && query.data && items[0]?.id !== startId) {
     return <div className="shorts-empty"><p>This Short is no longer available in your Shorts feed.</p>
       <button onClick={() => history.back()}>Back</button></div>;

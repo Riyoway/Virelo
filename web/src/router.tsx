@@ -1,5 +1,6 @@
 import { lazy, Suspense, type ComponentType, type LazyExoticComponent } from 'react';
 import { createRootRoute, createRoute, createRouter, Outlet } from '@tanstack/react-router';
+import { PageSkeleton, type SkeletonKind } from './components/PageSkeleton';
 import { Header } from './components/Header';
 import { MobileNav } from './components/MobileNav';
 import { NotFoundView } from './views/NotFoundView';
@@ -35,18 +36,18 @@ function Shell() {
   return <div className="app-shell"><Header /><main className="page-shell"><Outlet /></main><MobileNav /></div>;
 }
 
-function withSuspense(View: LazyExoticComponent<ComponentType>) {
+function withSuspense(View: LazyExoticComponent<ComponentType>, kind: SkeletonKind) {
   return function SuspendedView() {
-    return <Suspense fallback={<div className="route-loading skeleton" role="status" aria-label="Loading" />}><View /></Suspense>;
+    return <Suspense fallback={<PageSkeleton kind={kind} />}><View /></Suspense>;
   };
 }
 
-const HomeRouteView = withSuspense(HomeView);
-const LibraryRouteView = withSuspense(LibraryView);
-const SettingsRouteView = withSuspense(SettingsView);
-const WatchRouteView = withSuspense(WatchView);
-const DetailRouteView = withSuspense(DetailView);
-const ShortsRouteView = withSuspense(ShortsView);
+const HomeRouteView = withSuspense(HomeView, 'home');
+const LibraryRouteView = withSuspense(LibraryView, 'library');
+const SettingsRouteView = withSuspense(SettingsView, 'settings');
+const WatchRouteView = withSuspense(WatchView, 'watch');
+const DetailRouteView = withSuspense(DetailView, 'detail');
+const ShortsRouteView = withSuspense(ShortsView, 'shorts');
 
 const rootRoute = createRootRoute({ component: Shell, notFoundComponent: NotFoundView });
 const indexRoute = createRoute({ getParentRoute:()=>rootRoute, path:'/', component:HomeRouteView });

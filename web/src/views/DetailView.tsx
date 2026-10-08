@@ -1,3 +1,4 @@
+import { PageSkeleton } from '../components/PageSkeleton';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from '@tanstack/react-router';
 import { Button } from '@heroui/react';
@@ -19,7 +20,7 @@ export function DetailView() {
   });
   const refresh = useMutation({mutationFn:()=>api.refreshMetadata(id),onSuccess:(media)=>{client.setQueryData(['media',id],media);void client.invalidateQueries({predicate:(query)=>['home','media','related','shorts','watch-queue','queue','search'].includes(String(query.queryKey[0]))});}});
   if (loadError) return <div className="watch-empty"><h1>Video unavailable</h1><p>{loadError.message}</p><Button variant="secondary" onPress={()=>void refetch()}>Try again</Button></div>;
-  if (isLoading || !item) return <div className="detail-loading skeleton"/>;
+  if (isLoading || !item) return <PageSkeleton kind="detail" />;
   const isPortrait = Boolean(item.width && item.height && item.height > item.width);
   const landscapeThumb = !isPortrait && !item.poster_path;
   return <article className="detail-view">

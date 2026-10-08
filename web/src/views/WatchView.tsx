@@ -1,3 +1,4 @@
+import { PageSkeleton } from '../components/PageSkeleton';
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useParams, useSearch } from '@tanstack/react-router';
@@ -29,7 +30,7 @@ export function WatchView(){
   },[queueEnabled,mediaId,searchParams.search,searchParams.folder,searchParams.libraryId,searchParams.sort]);
 
   if (queueEnabled) {
-    if (!queueQ.data) return <div className="watch-loading skeleton"/>;
+    if (!queueQ.data) return <PageSkeleton kind="watch" />;
     const activeIndex=Math.max(items.findIndex((item)=>item.id===selectedId),0);
     const current = items[activeIndex];
     if (!current) return <div className="watch-empty"><h1>No media in this folder</h1><p>The current filter matches no videos.</p></div>;
@@ -57,6 +58,6 @@ export function WatchView(){
     </div>;
   }
   if (itemQ.isError) return <div className="watch-empty"><h1>Video unavailable</h1><p>{itemQ.error.message}</p><button onClick={()=>void itemQ.refetch()}>Try again</button></div>;
-  if (itemQ.isLoading || !itemQ.data) return <div className="watch-loading skeleton"/>;
+  if (itemQ.isLoading || !itemQ.data) return <PageSkeleton kind="watch" />;
   return <div className="watch-view"><button className="watch-back" onClick={()=>history.back()} aria-label="Back"><ArrowLeft/></button><Player item={itemQ.data} autoPlay/><div className="watch-copy"><h1>{itemQ.data.title}</h1><p>{itemQ.data.overview||itemQ.data.filename}</p></div></div>;
 }

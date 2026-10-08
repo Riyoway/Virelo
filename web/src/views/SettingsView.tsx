@@ -1,3 +1,4 @@
+import { PageSkeleton } from '../components/PageSkeleton';
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Input, Switch } from '@heroui/react';
@@ -47,7 +48,7 @@ export function SettingsView(){
   const add=useMutation({mutationFn:()=>api.addLibrary(path),onSuccess:()=>{setPath('');void client.invalidateQueries({queryKey:['libraries']});void client.invalidateQueries({queryKey:['scan']});}});
   const remove=useMutation({mutationFn:(id:number)=>api.removeLibrary(id),onSuccess:()=>{void client.invalidateQueries({queryKey:['libraries']});void client.invalidateQueries({queryKey:['home']});}});
   const clearMetadata=useMutation({mutationFn:api.clearAllMetadata,onSuccess:()=>client.invalidateQueries({predicate:(query)=>['home','media','related','shorts','watch-queue','queue','search'].includes(String(query.queryKey[0]))})});
-  if(!form)return <div className="settings-loading skeleton"/>;
+  if(!form)return <PageSkeleton kind="settings" />;
   const hasChanges=JSON.stringify(form)!==JSON.stringify(settingsQuery.data);
   return <div className={`content-view settings-view${mobileDetail?' settings-detail-open':''}`}>
     <header className="settings-heading"><h1>Settings</h1><div className="settings-heading-actions"><span aria-live="polite">{save.isSuccess&&!hasChanges&&<span className="settings-saved"><CheckCircle/> Saved</span>}</span><Button isPending={save.isPending} isDisabled={!hasChanges} onPress={()=>save.mutate()}>Save settings</Button></div></header>

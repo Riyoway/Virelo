@@ -1,3 +1,4 @@
+import { PageSkeleton } from '../components/PageSkeleton';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from '@heroui/react';
@@ -41,7 +42,7 @@ function FilteredHome({filter}:{filter:HomeFilter}) {
   const advance=useCallback(()=>{setAnimate(true);setHeroIndex(current=>(current+1)%heroPool.length);},[heroPool.length]);
   const rotation=useFeaturedRotation(heroRef,heroPool.length,hero?.id,advance);
   const pick=(items:MediaItem[]|undefined)=>(items??[]).filter(item=>filter==='all'||item.kind===filter);
-  if(home.isLoading)return <HomeSkeleton/>;
+  if(home.isLoading)return <PageSkeleton kind="home" />;
   if(home.isError&&!data)return <div className="home-load-error"><h1>Couldn’t load your library</h1><p>Try again to reconnect to your videos.</p><Button onPress={()=>void home.refetch()}>Try again</Button></div>;
   if(!data||data.total===0)return <EmptyState/>;
   const genres=hero?mediaGenres(hero.genres).slice(0,2):[];
@@ -108,9 +109,4 @@ function FeaturedArtwork({item}:{item:MediaItem}) {
   const sources=[...new Set((['backdrop','thumbnail','poster'] as const).filter(kind=>Boolean(kind==='backdrop'?item.backdrop_path:kind==='poster'?item.poster_path:item.thumbnail_path)).map(kind=>artwork(item,kind)))];
   const [fallback,setFallback]=useState(0);
   return fallback<sources.length?<img className="hero-backdrop" src={sources[fallback]} alt="" fetchPriority="high" onError={()=>setFallback(current=>current+1)}/>:null;
-}
-function HomeSkeleton() {
-  return <div className="home-skeleton"><div className="skeleton hero-skeleton"/>{[0,1].map(row=><div key={row}>
-    <div className="skeleton-line"/><div className="skeleton-row">{Array.from({length:6},(_,i)=><div className="skeleton card-skeleton" key={i}/>)}</div>
-  </div>)}</div>;
 }
