@@ -1,12 +1,10 @@
 import {createRequire} from 'node:module';
-import {mkdtemp,mkdir,stat,readFile,writeFile} from 'node:fs/promises';
+import {mkdtemp,mkdir,stat,readdir} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {execFileSync} from 'node:child_process';
 import assert from 'node:assert/strict';
 import {createVireloServer} from '../dist/server.js';
-import {transcodeStatus,adaptiveTranscodeStatus} from '../dist/transcode.js';
-import {playbackQualities} from '../dist/ffmpeg.js';
 const require=createRequire(process.env.VIRELO_TEST_NODE_PACKAGE||import.meta.url);
 const {chromium}=require('playwright');
 const root=await mkdtemp(join(tmpdir(),'virelo-seek-audit-')),media=process.env.VIRELO_SEEK_ASSETS||join(root,'media'),dataDir=join(root,'data');
@@ -25,6 +23,10 @@ for(const [name,codec] of [['compatible.mkv','ac3'],['direct.mp4','aac']]){
   const path=join(media,name),file=await stat(path);
   ids.push(db.upsertMedia({library_id:library.id,path,filename:name,title:name,sort_title:name,kind:'movie',series_title:null,season:null,episode:null,year:null,duration:120,width:854,height:480,video_codec:'h264',audio_codec:codec,container:name.split('.').at(-1),folder:'',size:file.size,mtime:file.mtimeMs,thumbnail_path:null,poster_path:null,backdrop_path:null,overview:null,genres:null,external_id:null}).id);
 }
+const dualPath=join(root,'dual.mp4');
+execFileSync(ffmpeg,['-y','-hide_banner','-loglevel','error','-i',join(media,'direct.mp4'),'-i',join(media,'compatible.mkv'),'-map','0:v:0','-map','0:a:0','-map','1:a:0','-c','copy','-metadata:s:a:0','language=eng','-metadata:s:a:1','language=jpn','-disposition:a:0','default','-disposition:a:1','0',dualPath],{windowsHide:true});
+const dualFile=await stat(dualPath),dualLibrary=db.addLibrary(root,'Synthetic audio audit');
+const dualId=db.upsertMedia({library_id:dualLibrary.id,path:dualPath,filename:'dual.mp4',title:'Synthetic dual audio',sort_title:'Synthetic dual audio',kind:'movie',series_title:null,season:null,episode:null,year:null,duration:120,width:854,height:480,video_codec:'h264',audio_codec:'aac',container:'mp4',folder:'',size:dualFile.size,mtime:dualFile.mtimeMs,thumbnail_path:null,poster_path:null,backdrop_path:null,overview:null,genres:null,external_id:null}).id;
 let longId;
 if(process.env.VIRELO_SEEK_LONG==='1'){
   const longMedia=join(root,'long-media');await mkdir(longMedia);
@@ -39,81 +41,48 @@ const base='http://127.0.0.1:'+app.server.address().port;
 const browser=await chromium.launch({headless:true,executablePath:process.env.VIRELO_TEST_CHROMIUM,args:['--autoplay-policy=no-user-gesture-required']});
 let checks=0;
 const check=(value,label)=>{assert.ok(value,label);checks++;console.log('PASS',label);};
-const limited=body=>{
-  const lines=body.split(/\r?\n/),result=[];
-  let segments=0;
-  for(const line of lines){
-    if(line.startsWith('#EXT-X-ENDLIST'))continue;
-    if(line.startsWith('#EXTINF:')&&segments>=6)break;
-    result.push(line);
-    if(line&&!line.startsWith('#'))segments++;
-  }
-  return result.join('\n')+'\n';
-};
-const pauseUntil=async(predicate)=>{
-  const deadline=Date.now()+45000;
-  while(!predicate()){if(Date.now()>deadline)throw Error('Test encoder did not complete');await new Promise(resolve=>setTimeout(resolve,100));}
-};
+const cacheFiles=async(dir=join(dataDir,'cache'))=>{const files=[];for(const entry of await readdir(dir,{withFileTypes:true}).catch(()=>[])){const path=join(dir,entry.name);if(entry.isDirectory())files.push(...await cacheFiles(path));else files.push(path);}return files;};
 try{
-  const context=await browser.newContext({serviceWorkers:'block'}),page=await context.newPage(),errors=[],requests=[];
+  const context=await browser.newContext({serviceWorkers:'block'}),page=await context.newPage(),errors=[],requests=[],segments=[];
   page.on('pageerror',error=>errors.push(error.message));
-  page.on('request',request=>{if(request.url().includes('/start')&&request.method()==='POST')requests.push({url:request.url(),body:request.postDataJSON()});});
-  // Freeze only the initial (zero-origin) playlist to simulate an encoder that
-  // has produced 12 seconds of a much longer film. New seek windows are real.
-  await page.route('**/hls/**/index.m3u8',async route=>{
-    if(route.request().url().includes('/seek/'))return route.continue();
-    const response=await route.fetch();
-    if(!response.ok())return route.fulfill({response});
-    await route.fulfill({response,body:limited(await response.text())});
-  });
+  page.on('request',request=>{if(request.url().includes('/start')&&request.method()==='POST')requests.push({url:request.url(),body:request.postDataJSON()});if(request.url().includes('/playback/')&&request.url().endsWith('.ts'))segments.push(request.url());});
   const seek=async position=>page.locator('.player-seek').evaluate((input,value)=>{
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,String(value));
     input.dispatchEvent(new Event('input',{bubbles:true}));
   },position);
   const snapshot=()=>page.locator('.player video').evaluate(video=>({time:video.currentTime,duration:video.duration,paused:video.paused,ready:video.readyState,audio:video.webkitAudioDecodedByteCount,seekable:[...Array(video.seekable.length)].map((_,i)=>[video.seekable.start(i),video.seekable.end(i)])}));
   const arrived=position=>page.waitForFunction(value=>{const v=document.querySelector('.player video');return v&&Math.abs(v.currentTime-value)<1.5&&v.readyState>=3;},position,{timeout:30000});
+  const clickControl=async name=>{await page.locator('.player').hover({position:{x:100,y:100}});await page.getByRole('button',{name,exact:true}).click();};
 
   await page.goto(base+'/watch/'+ids[0]+'?queue=false');
   await page.waitForFunction(()=>{const v=document.querySelector('.player video');return v&&!v.paused&&v.currentTime>.3;},{},{timeout:30000});
-  await pauseUntil(()=>transcodeStatus(dataDir,ids[0],1).complete);
-  const initial=join(dataDir,'cache','hls',String(ids[0]),'audio-1','index.m3u8');
-  // defaultAudioStream is 1. Keep the completed fixture's first six segments.
-  await writeFile(initial,limited(await readFile(initial,'utf8')));
-  console.log('PARTIAL_BEFORE',JSON.stringify(await snapshot()));
+  console.log('DEMAND_BEFORE',JSON.stringify(await snapshot()));
+  await page.waitForFunction(()=>document.querySelector('.player video').currentTime>12,{},{timeout:20000});
+  check(!(await snapshot()).paused,'compatible video and audio continue across six-second boundaries');
   await seek(92.4);
-  if(process.env.VIRELO_EXPECT_SEEK_FAILURE==='1'){
-    await page.waitForTimeout(2500);
-    check((await snapshot()).time<20,'old build reproduces snap back to generated prefix');
-    console.log('OLD_SEEK_RESULT',JSON.stringify(await snapshot()));
-  }else{
+  {
     await arrived(92.4);
     check((await snapshot()).paused===false,'compatible seek keeps playing');
-    check(requests.some(request=>request.body.startTime>=92),'encoder starts at the requested time');
+    check(segments.some(url=>url.endsWith('/segment-15.ts')),'seek requests only the segment containing 92 seconds');
     await page.waitForTimeout(1100);
     check((await snapshot()).time>92,'seek does not snap back after timeupdate');
     check((await snapshot()).audio>0,'compatible seek decodes audio');
     check(Number(await page.locator('.player-seek').getAttribute('max'))>=120,'range uses full movie duration');
     await seek(40);await seek(71);await seek(98.2);await arrived(98.2);
     check((await snapshot()).time>97,'rapid seeks retain the last target');
-    await page.getByRole('button',{name:'Pause',exact:true}).click();await seek(21.3);await arrived(21.3);
+    await clickControl('Pause');await seek(21.3);await arrived(21.3);
     check((await snapshot()).paused,'backward seek before window retains paused intent');
 
     await page.evaluate(()=>localStorage.setItem('virelo-playback-quality:v1','360'));
     await page.goto(base+'/watch/'+ids[1]+'?queue=false');
     await page.waitForFunction(()=>{const v=document.querySelector('.player video');return v&&!v.paused&&v.currentTime>.3;},{},{timeout:30000});
-    const qualities=playbackQualities(854,480);
-    await pauseUntil(()=>adaptiveTranscodeStatus(dataDir,ids[1],1,qualities).complete);
-    for(const quality of qualities){
-      const path=join(dataDir,'cache','hls',String(ids[1]),'adaptive-audio-1',String(quality.height),'index.m3u8');
-      await writeFile(path,limited(await readFile(path,'utf8')));
-    }
     await seek(88.7);await arrived(88.7);
-    check(requests.some(request=>request.url.includes('/quality/start')&&request.body.startTime>=88),'manual-quality seek starts a new window');
-    await page.getByRole('button',{name:'Quality',exact:true}).click();
+    check(segments.some(url=>url.includes('/360/segment-14.ts')),'manual-quality seek requests only the selected rendition');
+    await clickControl('Quality');
     check(await page.getByRole('menuitemradio',{name:/^360p/}).getAttribute('aria-checked')==='true','manual quality ceiling survives seek');
-    await page.getByRole('button',{name:'Quality',exact:true}).click();
+    await clickControl('Quality');
     await page.waitForTimeout(1000);check((await snapshot()).time>88,'adaptive playback does not return to old position');
-    await page.getByRole('button',{name:'Pause',exact:true}).click();await seek(30.3);await arrived(30.3);
+    await clickControl('Pause');await seek(30.3);await arrived(30.3);
     check((await snapshot()).paused,'adaptive backward seek retains pause');
 
     await page.evaluate(()=>localStorage.setItem('virelo-playback-quality:v1','highest'));
@@ -121,21 +90,39 @@ try{
     await page.waitForFunction(()=>{const v=document.querySelector('.player video');return v&&!v.paused&&v.currentTime>.3;},{},{timeout:30000});
     const previous=requests.length;await seek(90.2);await arrived(90.2);
     check(requests.length===previous,'direct-file seek has no conversion/preparation request');
+    await page.goto(base+'/watch/'+dualId+'?queue=false');
+    await page.waitForFunction(()=>{const v=document.querySelector('.player video');return v&&!v.paused&&v.currentTime>.3;},{},{timeout:30000});
+    await seek(40.2);await arrived(40.2);
+    await clickControl('Audio');
+    await page.getByRole('menuitemradio',{name:/AC3/i}).click();
+    await page.waitForFunction(()=>{const a=document.querySelector('.player audio'),v=document.querySelector('.player video');return a&&!a.paused&&a.readyState>=3&&Math.abs(a.currentTime-v.currentTime)<.4;},{},{timeout:30000});
+    check(segments.some(url=>url.includes('/audio/2/')),'audio-only fallback converts the selected unsupported track on demand');
+    await seek(88.7);await arrived(88.7);
+    await page.waitForFunction(()=>{const a=document.querySelector('.player audio'),v=document.querySelector('.player video');return !a.paused&&Math.abs(a.currentTime-v.currentTime)<.4;},{},{timeout:30000});
+    check((await snapshot()).time>88,'audio-only fallback stays in sync after a distant seek');
     if(longId){
       await page.goto(base+'/watch/'+longId+'?queue=false');
       await page.waitForFunction(()=>{const v=document.querySelector('.player video');return v&&!v.paused&&v.currentTime>.3;},{},{timeout:30000});
       await seek(2844.4);await arrived(2844.4);
-      check(requests.some(request=>request.url.includes('/media/'+longId+'/')&&request.body.startTime>=2844),'feature-length encoder starts at 47:24');
+      check(segments.some(url=>url.includes('/playback/'+longId+'/')&&url.endsWith('/segment-474.ts')),'feature-length encoder requests 47:24 without converting the prefix');
       check(!(await snapshot()).paused,'feature-length seek retains playback');
       check(Number(await page.locator('.player-seek').getAttribute('max'))>=7041,'feature-length range retains 1:57:21 duration');
       await page.waitForTimeout(1100);
       check(Math.abs((await snapshot()).time-2845.5)<3,'47-minute seek does not return to old position');
       console.log('LONG_FORWARD',JSON.stringify(await snapshot()));
-      await page.getByRole('button',{name:'Pause',exact:true}).click();await seek(896.2);await arrived(896.2);
+      await clickControl('Pause');await seek(896.2);await arrived(896.2);
       check((await snapshot()).paused,'feature-length backward seek retains pause');
     }
     check(errors.length===0,'no browser runtime errors '+errors.join('|'));
     console.log('FINAL',JSON.stringify(await snapshot()));
+    await page.goto('about:blank');await page.waitForTimeout(1500);
+    const generated=await cacheFiles();
+    check(generated.every(path=>!path.endsWith('.part')),'no abandoned encoder output after leaving playback');
+    check(!generated.some(path=>path.replaceAll('\\','/').includes('/adaptive/1/480/')),'unselected 480p rendition was never encoded');
+    const bytes=(await Promise.all(generated.map(path=>stat(path)))).reduce((sum,file)=>sum+file.size,0);
+    check(bytes<64*1024*1024,'multiple seeks and a feature-length clip use less than 64 MiB in this fixture');
+    await page.waitForTimeout(1200);check((await cacheFiles()).length===generated.length,'cache stops growing after playback is closed');
+    console.log('CACHE_BYTES',bytes);
   }
   console.log(JSON.stringify({checks,root}));
 }finally{await browser.close();await app.close();}

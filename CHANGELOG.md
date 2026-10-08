@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Replace whole-film, all-rendition conversion with on-demand six-second video/audio segments. Preserve full-duration seeking and manual quality ceilings without encoding the skipped prefix or unrequested resolutions.
+- Limit the shared playback cache to 512 MiB by default, prune legacy caches and least-recently-used files, protect active responses, limit encoders to two and cancel abandoned requests.
+
 - Group player viewing controls, theme scrollbars, and add keyboard-accessible video context menus that work in fullscreen.
 - Add explicit repeat-off, repeat-video and repeat-queue modes, retaining the choice between queued videos and supporting single-item queues.
 - Replace framed queue cards with a compact filmstrip; scroll its rail with arrows, wheel, touch and keyboard without changing playback. Keep captions above wrapping controls on narrow screens.

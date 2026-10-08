@@ -139,7 +139,7 @@ Virelo works without FFmpeg for formats supported by the browser. Installing `ff
 - thumbnails and media probing
 - codec detection
 - selectable audio tracks and embedded text subtitles
-- progressive audio-only AAC/HLS fallback for incompatible audio, without re-encoding video the browser can already play
+- on-demand audio-only AAC/HLS fallback for incompatible audio, without re-encoding video the browser can already play
 - Auto video quality that adapts to network conditions, plus manual resolution selection up to the source quality
 
 Virelo can automatically match filenames to movie and series metadata, then cache posters, backdrops, and episode artwork locally. Configure this from **Settings → Network**. Source video files are never sent to the metadata provider.
@@ -154,10 +154,17 @@ The default data directory is `~/.virelo`:
   thumbnails/
   artwork/
   cache/
-    hls/
+    segments-v1/  # requested video/audio segments, shared size limit
+    hls/          # extracted text subtitles and legacy caches
 ```
 
 Videos stay in their original folders and are never copied into the data directory. Use `--data <path>` to choose another location.
+
+Converted playback uses **six-second segments generated only when the browser requests them**, at the requested resolution/audio track. Choosing Auto does not pre-convert every rendition or the whole movie. Directly playable files still use HTTP Range playback without conversion. At most two segment encoders run concurrently; abandoned requests are cancelled.
+
+Playback cache is limited to **512 MiB by default** across video and audio. Unused least-recently-used files are removed automatically; currently served segments are protected. Legacy whole-film caches are included in the budget and pruned on normal server startup. Originals, the library database, artwork and thumbnails are outside this playback-cache budget. Deleted converted segments can be regenerated from the originals when needed.
+
+Set `VIRELO_CACHE_MAX_MB` before starting the server to change the playback-cache budget (128–65536 MiB). This controls disk usage, not the browser's short playback buffer.
 
 ## 🔐 Network access
 

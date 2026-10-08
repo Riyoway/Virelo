@@ -2,7 +2,7 @@ import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import chokidar, { type FSWatcher } from 'chokidar';
 import { createReadStream, existsSync } from 'node:fs';
-import { stat, readFile } from 'node:fs/promises';
+import { stat } from 'node:fs/promises';
 import { basename, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { VireloDB } from './db.js';
@@ -13,7 +13,7 @@ import { hasFfmpeg, hasFfprobe, playbackQualities, probePlaybackInfo } from './f
 import { adaptiveTranscodeStatus, audioTranscodeStatus, extractSubtitleVtt, startAdaptiveTranscode, startAudioTranscode, startHlsTranscode, transcodeStatus, stopAllTranscodes } from './transcode.js';
 import type { AppSettings, MediaKind, ScanStatus, SortKey } from './types.js';
 import { VIRELO_VERSION } from './version.js';
-import { seekWindowPlaylist } from './hls-seek.js';
+import { demandManifest, demandSegment, initializeDemandCache } from './demand-playback.js';
 
 const SORT_KEYS: SortKey[] = ['title', 'newest', 'oldest', 'year', 'duration', 'random'];
 
@@ -66,6 +66,7 @@ function isHiddenPath(path: string) {
 
 export async function createVireloServer(config: RuntimeConfig) {
   ensureDataDirs(config.dataDir);
+  await initializeDemandCache(config.dataDir);
   const db = new VireloDB(config.dataDir);
   const app = Fastify({ logger: { level: process.env.VIRELO_LOG_LEVEL || 'info' }, bodyLimit: 1024 * 1024 });
   app.addHook('onRequest', async (request, reply) => {
@@ -252,7 +253,7 @@ export async function createVireloServer(config: RuntimeConfig) {
       if (!Number.isInteger(audioStream) || audioStream < 0) return reply.code(400).send({ error: 'Invalid audio stream.' });
       if (!info?.audioTracks.some((track) => track.index === audioStream)) return reply.code(400).send({ error: 'Audio stream not found.' });
     }
-    return startHlsTranscode(config.dataDir, media.id, media.path, { audioStream, copyVideo:info?.videoCodec==='h264',startTime });
+    return startHlsTranscode(config.dataDir, media.id, media.path, { audioStream, copyVideo:info?.videoCodec==='h264',startTime,duration:media.duration });
   });
   app.get<{ Params: { id: string }; Querystring: { audioStream?: string; startTime?: string } }>('/api/media/:id/transcode/status', async (request, reply) => {
     const audioStream = request.query.audioStream === undefined ? undefined : Number(request.query.audioStream);
@@ -270,7 +271,7 @@ export async function createVireloServer(config: RuntimeConfig) {
     if(!info||!info.width||!info.height)return reply.code(503).send({error:'Video resolution could not be inspected.'});
     const audioStream=request.body?.audioStream;
     if(audioStream!==undefined&&(!Number.isInteger(audioStream)||!info.audioTracks.some((track)=>track.index===audioStream)))return reply.code(400).send({error:'Audio stream not found.'});
-    return startAdaptiveTranscode(config.dataDir,media.id,media.path,{audioStream,hasAudio:info.audioTracks.length>0,sourceWidth:info.width,sourceHeight:info.height,qualities:info.qualityOptions,startTime});
+    return startAdaptiveTranscode(config.dataDir,media.id,media.path,{audioStream,hasAudio:info.audioTracks.length>0,sourceWidth:info.width,sourceHeight:info.height,qualities:info.qualityOptions,startTime,duration:media.duration});
   });
   app.get<{ Params: { id: string }; Querystring: { audioStream?: string; startTime?: string } }>('/api/media/:id/quality/status', async (request, reply) => {
     const media=db.getMedia(Number(request.params.id));
@@ -288,7 +289,7 @@ export async function createVireloServer(config: RuntimeConfig) {
     if (!Number.isInteger(audioStream) || Number(audioStream) < 0) return reply.code(400).send({ error: 'Invalid audio stream.' });
     const info = await probePlaybackInfo(media.path);
     if (!info?.audioTracks.some((track) => track.index === audioStream)) return reply.code(400).send({ error: 'Audio stream not found.' });
-    return startAudioTranscode(config.dataDir, media.id, media.path, Number(audioStream));
+    return startAudioTranscode(config.dataDir, media.id, media.path, Number(audioStream),media.duration);
   });
   app.get<{ Params: { id: string }; Querystring: { audioStream?: string } }>('/api/media/:id/audio/status', async (request, reply) => {
     const media = db.getMedia(Number(request.params.id));
@@ -390,17 +391,21 @@ export async function createVireloServer(config: RuntimeConfig) {
     return reply.send(createReadStream(media.path, { start, end }));
   });
 
-  // Window playlists keep the absolute movie timeline. Real segments remain
-  // ordinary static files; only the unencoded prefix is marked as an HLS GAP.
-  for(const url of ['/hls/:id/seek/:startTime/:variant/index.m3u8','/hls/:id/seek/:startTime/:variant/:height/index.m3u8']){
-    app.get<{Params:{id:string;startTime:string;variant:string;height?:string}}>(url,async(request,reply)=>{
-      const {id,startTime,variant,height}=request.params;
-      if(!/^\d+$/.test(id)||!/^\d+$/.test(startTime)||!Number.isSafeInteger(Number(startTime))||! /^(default|audio-\d+|adaptive-default|adaptive-audio-\d+)$/.test(variant)||(height!==undefined&&!/^\d+$/.test(height)))return reply.code(400).send({error:'Invalid seek playlist.'});
-      const path=resolve(config.dataDir,'cache','hls',id,'seek',startTime,variant,...(height?[height]:[]),'index.m3u8');
-      try{return reply.type('application/vnd.apple.mpegurl').header('Cache-Control','no-store').send(seekWindowPlaylist(await readFile(path,'utf8'),Number(startTime)));}
-      catch{return reply.code(404).send({error:'Seek playlist is not ready.'});}
-    });
-  }
+  app.get<{Params:{id:string;stamp:string;mode:string;audio:string;'*':string}}>('/playback/:id/:stamp/:mode/:audio/*',async(request,reply)=>{
+    const {id,stamp,mode,audio}=request.params,resource=request.params['*'];
+    const prefix=`/playback/${id}/${stamp}/${mode}/${audio}`;
+    const manifest=demandManifest(config.dataDir,prefix,resource);
+    if(manifest!==null)return reply.type('application/vnd.apple.mpegurl').header('Cache-Control','no-store').send(manifest);
+    if(!/^(?:\d+\/)?segment-\d+\.ts$/.test(resource))return reply.code(404).send({error:'Playback resource not found.'});
+    const controller=new AbortController();
+    const abort=()=>{if(!reply.raw.writableFinished)controller.abort();};reply.raw.once('close',abort);
+    try{
+      const segment=await demandSegment(config.dataDir,prefix,resource,controller.signal);
+      if(controller.signal.aborted){segment.release();return reply;}
+      reply.raw.once('close',segment.release);
+      return reply.type('video/mp2t').header('Cache-Control','private, max-age=3600').send(createReadStream(segment.path));
+    }catch(reason){if(controller.signal.aborted)return reply;return reply.code(503).send({error:reason instanceof Error?reason.message:'Playback segment is unavailable.'});}
+  });
   await app.register(fastifyStatic, { root: resolve(config.dataDir, 'cache', 'hls'), prefix: '/hls/', wildcard: true, decorateReply: false, cacheControl: false });
   await app.register(fastifyStatic, { root: resolve(config.dataDir, 'cache', 'audio'), prefix: '/audio/', wildcard: true, decorateReply: false, cacheControl: false });
   await app.register(fastifyStatic, { root: webRoot, prefix: '/', wildcard: false, decorateReply: true });
@@ -412,7 +417,7 @@ export async function createVireloServer(config: RuntimeConfig) {
   app.addHook('onClose', async () => {
     if (watchDebounce) clearTimeout(watchDebounce);
     if (watcher) await watcher.close();
-    stopAllTranscodes();
+    await stopAllTranscodes(config.dataDir);
     db.close();
   });
 
