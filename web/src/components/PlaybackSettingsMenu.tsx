@@ -2,6 +2,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, MonitorPlay, SpeakerHigh, Subtitles, Waveform } from '@phosphor-icons/react';
 import type { PlaybackQuality, PlaybackTrack } from '../types';
+import type { QualityPreference } from '../utils/playback-quality';
 
 type Setting = 'quality'|'audio'|'subtitles';
 
@@ -13,16 +14,17 @@ interface PlaybackSettingsMenuProps {
   busy?: boolean;
   qualityOptions: PlaybackQuality[];
   selectedQuality: number|null;
+  qualityPreference: QualityPreference;
   activeQuality?: number|null;
   allowAutoQuality?: boolean;
   onSelectAudio: (stream: number) => void;
   onSelectSubtitle: (stream: number|null) => void;
-  onSelectQuality: (height: number|null) => void;
+  onSelectQuality: (preference: QualityPreference) => void;
 }
 
 export function PlaybackSettingsMenu({
   audioTracks, subtitleTracks, selectedAudio, selectedSubtitle, busy=false,
-  qualityOptions, selectedQuality, activeQuality=null, allowAutoQuality=false,
+  qualityOptions, selectedQuality, qualityPreference, activeQuality=null, allowAutoQuality=false,
   onSelectAudio, onSelectSubtitle, onSelectQuality
 }: PlaybackSettingsMenuProps) {
   const [open,setOpen] = useState<Setting|null>(null);
@@ -116,7 +118,7 @@ export function PlaybackSettingsMenu({
   }
 
   const label=open==='quality'?'Quality':open==='audio'?'Audio':'Subtitles';
-  const displayedQuality=selectedQuality===null&&allowAutoQuality?'Auto':qualityLabel(selectedQuality??activeQuality??qualityOptions[0]?.height);
+  const displayedQuality=qualityPreference==='source'?'Original':qualityPreference==='auto'&&allowAutoQuality?'Auto':qualityLabel(selectedQuality??activeQuality??qualityOptions[0]?.height);
   const selectedAudioTrack=audioTracks.find(track=>track.index===selectedAudio);
   const selectedSubtitleTrack=subtitleTracks.find(track=>track.index===selectedSubtitle);
 
@@ -143,17 +145,23 @@ export function PlaybackSettingsMenu({
       }}>
       <h3>{open==='quality'?<MonitorPlay/>:open==='audio'?<SpeakerHigh/>:<Subtitles/>}{label}</h3>
       <div className="playback-track-list">
+        {open==='quality'&&<button type="button" role="menuitemradio" tabIndex={-1}
+          aria-checked={qualityPreference==='source'} className={qualityPreference==='source'?'selected':''}
+          disabled={busy} onClick={()=>select(()=>onSelectQuality('source'))}>
+          <span><strong>Original Quality</strong><small>Uses each video's original resolution</small></span>
+          {qualityPreference==='source'&&<Check weight="bold"/>}
+        </button>}
         {open==='quality'&&allowAutoQuality&&<button type="button" role="menuitemradio" tabIndex={-1}
-          aria-checked={selectedQuality===null} className={selectedQuality===null?'selected':''}
-          disabled={busy} onClick={()=>select(()=>onSelectQuality(null))}>
+          aria-checked={qualityPreference==='auto'} className={qualityPreference==='auto'?'selected':''}
+          disabled={busy} onClick={()=>select(()=>onSelectQuality('auto'))}>
           <span><strong>Auto</strong><small>{activeQuality?`Playing at ${qualityLabel(activeQuality)}`:'Adjusts to your network'}</small></span>
-          {selectedQuality===null&&<Check weight="bold"/>}
+          {qualityPreference==='auto'&&<Check weight="bold"/>}
         </button>}
         {open==='quality'&&qualityOptions.map((quality,index)=><button type="button" role="menuitemradio" tabIndex={-1}
-          aria-checked={selectedQuality===quality.height} className={selectedQuality===quality.height?'selected':''}
+          aria-checked={typeof qualityPreference==='number'&&selectedQuality===quality.height} className={typeof qualityPreference==='number'&&selectedQuality===quality.height?'selected':''}
           disabled={busy} key={quality.height} onClick={()=>select(()=>onSelectQuality(quality.height))}>
-          <span><strong>{quality.label}</strong><small>{index===0?'Original quality':formatBitrate(quality.bitrate)}</small></span>
-          {selectedQuality===quality.height&&<Check weight="bold"/>}
+          <span><strong>{quality.label}</strong><small>{index===0?'Highest available':formatBitrate(quality.bitrate)}</small></span>
+          {typeof qualityPreference==='number'&&selectedQuality===quality.height&&<Check weight="bold"/>}
         </button>)}
         {open==='audio'&&audioTracks.map(track=><button type="button" role="menuitemradio" tabIndex={-1}
           aria-checked={selectedAudio===track.index} className={selectedAudio===track.index?'selected':''}

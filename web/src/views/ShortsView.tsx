@@ -6,6 +6,7 @@ import { ArrowDown, ArrowLeft, Heart, PictureInPicture, SpeakerHigh, SpeakerSlas
 import { api } from '../api';
 import { playVideo } from '../utils/media-playback';
 import { useBackgroundPlayback } from '../hooks/useBackgroundPlayback';
+import { usePlaybackVolume } from '../hooks/usePlaybackVolume';
 import { MediaContextMenu } from '../components/MediaContextMenu';
 import { useHlsFallback } from '../hooks/useHlsFallback';
 import type { ShortItem } from '../types';
@@ -147,7 +148,7 @@ function ShortsClip({ item, active, onSkip, pipOn, onPip }: { item: ShortItem; a
   const longPressTriggered = useRef(false);
   const { fallback, error, startFallback } = useHlsFallback(item, videoRef, wantsPlayback);
   const lastReport = useRef(0);
-  const [muted, setMuted] = useState(false);
+  const {volume,muted,setMuted} = usePlaybackVolume();
   const [liked, setLiked] = useState(item.liked === 1);
   const [likeBusy, setLikeBusy] = useState(false);
   const [pip, setPip] = useState(false);
@@ -212,8 +213,8 @@ function ShortsClip({ item, active, onSkip, pipOn, onPip }: { item: ShortItem; a
       try { video.currentTime = resume; } catch { /* retry after metadata */ }
     }
     setProgress(duration > 0 ? Math.min(100, (resume / duration) * 100) : 0);
-    video.muted = false;
-    setMuted(false);
+    video.volume=volume;
+    video.muted=muted;
     const followPip = () => { if (!cancelled && activeRef.current && pipOn && document.pictureInPictureEnabled && typeof video.requestPictureInPicture === 'function') requestPip(video); };
     void playVideo(video, () => !cancelled && activeRef.current && wantsPlayback.current, () => setMuted(true)).then(followPip);
     return () => { cancelled = true; video.pause(); };
@@ -232,6 +233,11 @@ function ShortsClip({ item, active, onSkip, pipOn, onPip }: { item: ShortItem; a
     video.muted = !video.muted;
     setMuted(video.muted);
   }
+
+  useEffect(()=>{
+    const video=videoRef.current;
+    if(video){video.volume=volume;video.muted=muted;}
+  },[volume,muted]);
 
   function report(video: HTMLVideoElement) {
     const duration = video.duration || item.duration || 0;

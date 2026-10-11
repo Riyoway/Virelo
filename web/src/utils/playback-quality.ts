@@ -20,8 +20,8 @@ export function readQualityPreference(allowAuto: boolean): QualityPreference {
   return preference ?? (allowAuto ? 'auto' : 'source');
 }
 
-export function saveQualityPreference(height: number | null) {
-  sessionPreference = height === null ? 'auto' : height;
+export function saveQualityPreference(preference: QualityPreference | null) {
+  sessionPreference = preference === null ? 'auto' : preference;
   try { window.localStorage.setItem(STORAGE_KEY, String(sessionPreference)); }
   catch { /* Still retain the preference across videos in this tab. */ }
 }

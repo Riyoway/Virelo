@@ -58,6 +58,9 @@ try {
     const {createRoot}=(await import(imports.find(url=>url.includes('/react-dom_client.js')))).default;
     const {api}=await import('/src/api.ts');
     const {Player}=await import('/src/components/Player.tsx');
+    const {PlaybackQueue}=await import('/src/components/PlaybackQueue.tsx');
+    const {QueryClient,QueryClientProvider}=await import(imports.find(url=>url.includes('react-query')));
+    const client=new QueryClient({defaultOptions:{queries:{retry:false}}});
     window.__failQuality=false;window.__noLower=false;window.__conversions=[];window.__starts=[];window.__plays=[];
     const item=id=>({id,title:'Quality test '+id,filename:'test-'+id+'.mp4',duration:25,width:id===3?854:1920,height:id===3?480:1080,progress_position:0});
     api.progress=async()=>{};
@@ -77,7 +80,15 @@ try {
     api.mediaSource=async id=>base+'/__quality/'+(id===3?'source480.mp4':'source.mp4');
     document.body.replaceChildren();const rootNode=document.createElement('div');document.body.append(rootNode);const root=createRoot(rootNode);
     document.addEventListener('playing',event=>{if(event.target.tagName==='VIDEO')window.__plays.push({id:window.__itemId,height:event.target.videoHeight,src:event.target.currentSrc});},true);
-    window.__mount=id=>{window.__itemId=id;root.render(React.createElement(Player,{item:item(id),autoPlay:true}));};
+    function Harness({id}) {
+      const [repeat,setRepeat]=React.useState('off');
+      const queue=Array.from({length:10},(_,i)=>item(i+1));
+      return React.createElement(React.Fragment,null,
+        React.createElement(Player,{item:item(id),autoPlay:true,queue,queueIndex:0,repeatMode:repeat,onRepeatChange:setRepeat}),
+        React.createElement(PlaybackQueue,{items:queue,activeIndex:0,repeatMode:repeat,onRepeatChange:setRepeat,onSelect:()=>{}})
+      );
+    }
+    window.__mount=id=>{window.__itemId=id;root.render(React.createElement(QueryClientProvider,{client},React.createElement(Harness,{id})));};
   },{base,mode});
   const mount=async id=>{await page.evaluate(id=>{window.__plays=[];window.__mount(id);},id);};
   const waitVideo=async height=>{
@@ -91,13 +102,39 @@ try {
   const preference=()=>page.evaluate(()=>localStorage.getItem('virelo-playback-quality:v1'));
   await setup();await mount(1);await waitVideo(1080);
   check(true,mode+' default original playback');
+  const repeatButton=page.getByRole('button',{name:'Repeat',exact:true});
+  for(const [label,loop] of [['Repeat video',true],['Repeat queue',false],['Repeat off',false]]) {
+    await repeatButton.click();
+    check((await repeatButton.getAttribute('title')).startsWith(label)&&await page.locator('.player video').evaluate(v=>v.loop)===loop,mode+' direct repeat cycle '+label);
+    check(await page.getByRole('menu',{name:'Repeat',exact:true}).count()===0,mode+' repeat opens no menu');
+  }
+  const queueRepeat=page.locator('.playback-queue').getByRole('button',{name:'Repeat queue',exact:true});
+  await queueRepeat.click();await queueRepeat.click();
+  check((await repeatButton.getAttribute('title')).startsWith('Repeat queue'),mode+' queue repeat selects queue immediately and is idempotent');
+  await repeatButton.click();
+  await page.locator('.player video').click({button:'right'});
+  const actions=page.getByRole('menu',{name:'Video actions'});
+  check(await actions.getByRole('menuitemradio',{name:'Repeat video',exact:true}).count()===1&&await actions.getByRole('menuitemradio').count()===1
+    &&await actions.getByRole('menuitem',{name:'Quality',exact:true}).count()===0,mode+' context only has Repeat video and no Quality');
+  check(await actions.getByRole('menuitemradio',{name:'Repeat video',exact:true}).locator('svg').count()===1,mode+' context repeat has an icon');
+  await page.keyboard.press('Escape');
+  check(await page.evaluate(()=>['html','body','.playback-queue-list'].every(selector=>getComputedStyle(document.querySelector(selector)).scrollbarWidth==='none')),mode+' horizontal and vertical native scrollbars hidden');
+  await page.locator('.playback-queue-list').hover();await page.mouse.wheel(0,350);
+  await page.waitForFunction(()=>document.querySelector('.playback-queue-list').scrollLeft>10);
+  check(true,mode+' queue wheel remains scrollable without a scrollbar');
+  await page.getByRole('button',{name:'Scroll queue right',exact:true}).click();
+  check(true,mode+' queue arrow remains usable after wheel');
+  await page.locator('[aria-label="Volume"]').fill('0.35');
+  check(await page.locator('.player video').evaluate(v=>v.volume===.35),mode+' actual volume applied');
   await page.getByRole('button',{name:'Quality',exact:true}).click();
   check(await page.getByRole('menuitemradio',{name:/^Auto/}).count()===(mode==='npm-network'?1:0),mode+' Auto is available only on network connections');
+  check(await page.getByRole('menuitemradio',{name:/^Original Quality/}).count()===1&&await page.getByRole('menuitemradio',{name:/^1080p/}).count()===1,mode+' Original Quality and 1080p are separate options');
   if(mode==='npm-network')check(await page.getByRole('menuitemradio',{name:/^Auto/}).getAttribute('aria-checked')==='true',mode+' network default is Auto without preparation');
   await page.getByRole('button',{name:'Quality',exact:true}).click();
   await choose(720);await waitVideo(720);
   check(await preference()==='720',mode+' manual quality saved');
   await mount(2);await waitVideo(720);
+  check(await page.locator('.player video').evaluate(v=>v.volume===.35),mode+' volume retained on next video');
   check((await page.evaluate(()=>window.__plays)).every(play=>play.height<=720),mode+' next video never starts above 720p');
   await mount(3);await waitVideo(480);
   check(await preference()==='720',mode+' lower source keeps 720p preference');
@@ -105,6 +142,7 @@ try {
   check(true,mode+' higher source returns to saved ceiling, not highest');
   await page.reload();await page.locator('.splash-screen').waitFor({state:'hidden'});await setup();await mount(4);await waitVideo(720);
   check(await preference()==='720',mode+' page reload retains selection');
+  check(await page.locator('.player video').evaluate(v=>v.volume===.35),mode+' volume retained after reload');
   await page.evaluate(()=>{window.__failQuality=true;});await mount(5);
   await page.locator('.player-status.error').waitFor({timeout:45000});
   check(await page.locator('.player video').evaluate(v=>v.paused),mode+' conversion failure remains paused');
@@ -132,6 +170,20 @@ try {
   if(mode!=='web')check(!requested.some(path=>path.startsWith('1080/segment-')),mode+' missing rendition never downloads higher segments');
   await choose(1080);await waitVideo(1080);
   check(true,mode+' original-quality recovery remains accessible when no lower rendition exists');
+  await page.evaluate(()=>{window.__noLower=false;});
+  await mount(1);await waitVideo(1080);
+  await choose(720);await waitVideo(720);
+  await page.getByRole('button',{name:'Quality',exact:true}).click();
+  await page.getByRole('menuitemradio',{name:/^Original Quality/}).click();
+  await waitVideo(1080);
+  check(await preference()==='source',mode+' return from lower quality to Original uses original stream');
+  const preparations=await page.evaluate(()=>window.__starts.length+window.__conversions.length);
+  await mount(3);await waitVideo(480);
+  await mount(1);await waitVideo(1080);
+  check(await preference()==='source'&&await page.evaluate(()=>window.__starts.length+window.__conversions.length)===preparations,mode+' Original follows each source without quality preparation');
+  await page.getByRole('button',{name:'Mute',exact:true}).click();
+  await mount(2);await waitVideo(1080);
+  check(await page.locator('.player video').evaluate(v=>v.muted&&v.volume===.35),mode+' mute and saved volume both follow next video');
   check(errors.length===0,mode+' no runtime errors: '+errors.join('|'));
   await context.close();
  }

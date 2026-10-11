@@ -45,7 +45,7 @@ export function PlaybackQueue({items,activeIndex,repeatMode,onRepeatChange,onSel
         <div><h2 id="playback-queue-title">Queue</h2><span>{activeIndex+1} of {items.length}</span></div>
       </div>
       <div className="playback-queue-nav">
-        <RepeatControl mode={repeatMode} hasQueue onChange={onRepeatChange}/>
+        <RepeatControl mode={repeatMode} hasQueue queueOnly onChange={onRepeatChange}/>
         <button type="button" onClick={()=>browse(-1)} disabled={!edges.left} aria-label="Scroll queue left"><CaretLeft/></button>
         <button type="button" onClick={()=>browse(1)} disabled={!edges.right} aria-label="Scroll queue right"><CaretRight/></button>
       </div>

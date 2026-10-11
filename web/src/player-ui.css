@@ -24,8 +24,8 @@
 .player-action-menu>button>span { flex:1; }
 .player-action-menu svg { flex:none; width:18px; height:18px; }
 .player-action-menu>button[aria-checked="true"] svg:last-child { color:var(--color-brand); }
-.playback-track-list,.player-action-menu { scrollbar-width:thin; scrollbar-color:#626269 transparent; }
-.playback-track-list::-webkit-scrollbar,.player-action-menu::-webkit-scrollbar { display:block; width:6px; }
+.playback-track-list,.player-action-menu { scrollbar-width:none; }
+.playback-track-list::-webkit-scrollbar,.player-action-menu::-webkit-scrollbar { display:none; }
 
 /* The queue is a filmstrip, not a second framed dashboard. */
 .playback-queue { margin-top:24px; border:0; border-radius:0; box-shadow:none; background:transparent; }
@@ -37,8 +37,8 @@
 .playback-queue-title span { margin:0; color:var(--muted-2); font-size:12px; }
 .playback-queue-nav { gap:4px; }
 .playback-queue-nav button { border-radius:6px; width:38px; height:38px; }
-.playback-queue-list { position:relative; grid-auto-columns:clamp(200px,20vw,260px); gap:14px; padding:0 2px 12px; scrollbar-width:thin; scrollbar-color:#626269 transparent; }
-.playback-queue-list::-webkit-scrollbar { display:block; height:6px; }
+.playback-queue-list { position:relative; grid-auto-columns:clamp(200px,20vw,260px); gap:14px; padding:0 2px 12px; scrollbar-width:none; }
+.playback-queue-list::-webkit-scrollbar { display:none; }
 .playback-queue-item { display:flex; flex-direction:column; align-items:stretch; gap:10px; padding:0 0 8px; min-height:0; border:0; border-radius:0; background:transparent; }
 .playback-queue-item:hover { background:transparent; }
 .playback-queue-item.active { border:0; background:transparent; box-shadow:none; }

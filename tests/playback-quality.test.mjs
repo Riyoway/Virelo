@@ -13,6 +13,19 @@ function storage(values={}) {
 }
 const qualities=(...heights)=>heights.map(height=>({height}));
 
+test('Original Quality is stored separately from a fixed source-height selection',async()=>{
+  const entries=storage();let q=await fresh();
+  q.saveQualityPreference(1080);
+  assert.equal(q.resolvePreferredQuality(qualities(2160,1080,720),q.readQualityPreference(false)),1080);
+  q.saveQualityPreference('source');
+  assert.equal(entries.get('virelo-playback-quality:v1'),'source');
+  q=await fresh();
+  for(const height of [2160,1440,1080,720,480]) {
+    assert.equal(q.resolvePreferredQuality(qualities(height,360),q.readQualityPreference(false)),height);
+  }
+  assert.equal(q.readQualityPreference(true),'source');
+});
+
 test('manual resolution stays a ceiling across higher and lower resolution videos',async()=>{
   storage();const q=await fresh();q.saveQualityPreference(720);
   for(const heights of [[2160,1440,1080,720,480,360],[1440,1080,720,480],[720,480,360],[480,360]]){

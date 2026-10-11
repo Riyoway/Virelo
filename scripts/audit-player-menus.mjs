@@ -54,7 +54,7 @@ try {
         h('div',{className:'player-tools'},
         h(PlaybackSettingsMenu,{audioTracks:limited?tracks.slice(0,1):tracks,subtitleTracks:limited?[]:captions,
           qualityOptions:limited?[{height:1080,label:'1080p',bitrate:5000000}]:[1080,720,480,360].map(height=>({height,label:height+'p',bitrate:1400000})),
-          selectedAudio,selectedSubtitle,selectedQuality,busy,allowAutoQuality:false,
+          selectedAudio,selectedSubtitle,selectedQuality,qualityPreference:selectedQuality,busy,allowAutoQuality:false,
           onSelectAudio:select('audio',audio),onSelectSubtitle:select('subtitles',subtitle),onSelectQuality:select('quality',quality)}),
         button(PictureInPicture,'Picture in Picture'),button(ArrowsOut,'Fullscreen')))));
    }
@@ -84,7 +84,7 @@ try {
   await trigger('Quality').click();await page.keyboard.press('ArrowDown');await page.keyboard.press('Enter');
   check(await page.evaluate(()=>window.__selections.at(-1).kind==='quality'&&window.__selections.at(-1).value===720),mode+' keyboard selects quality');
   check((await trigger('Quality').innerText()).includes('720p'),mode+' current quality shown in toolbar');
-  await trigger('Audio').click();await page.locator('video').click();
+  await trigger('Audio').click();await page.locator('video').click({position:{x:16,y:16}});
   check(await page.getByRole('menu').count()===0,mode+' outside click closes menu');
   await trigger('Audio').click();await page.keyboard.press('Tab');
   check(await page.getByRole('menu').count()===0&&await trigger('Subtitles').evaluate(e=>e===document.activeElement),mode+' Tab closes and continues toolbar navigation');
@@ -110,9 +110,10 @@ try {
   await page.keyboard.press('Escape');await page.evaluate(()=>document.exitFullscreen());
   await page.evaluate(()=>window.__limited(true));
   await trigger('Audio').waitFor({state:'hidden'});await trigger('Subtitles').waitFor({state:'hidden'});
+  await trigger('Audio').waitFor({state:'hidden'});await trigger('Subtitles').waitFor({state:'hidden'});
   check(await trigger('Audio').count()===0&&await trigger('Subtitles').count()===0,mode+' unavailable track controls omitted');
   await trigger('Quality').click();
-  check(await menu('Quality').getByRole('menuitemradio').count()===1,mode+' original quality remains accessible when only one choice exists');
+  check(await menu('Quality').getByRole('menuitemradio').count()===2&&await menu('Quality').getByRole('menuitemradio',{name:/^Original Quality/}).count()===1,mode+' Original Quality remains distinct from the sole fixed resolution');
   check(errors.length===0,mode+' no runtime errors '+errors.join('|'));
   await context.close();
  }

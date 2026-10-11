@@ -1,17 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowsOut, FastForward, Pause, PictureInPicture, Play, Rewind, SkipBack, SkipForward, SpeakerHigh, SpeakerSlash, SpinnerGap } from '@phosphor-icons/react';
+import { ArrowsOut, FastForward, Pause, PictureInPicture, Play, Repeat, Rewind, SkipBack, SkipForward, SpeakerHigh, SpeakerSlash, SpinnerGap } from '@phosphor-icons/react';
 import { api } from '../api';
 import { useHlsFallback } from '../hooks/useHlsFallback';
 import { useAdaptiveQuality } from '../hooks/useAdaptiveQuality';
 import { playVideo } from '../utils/media-playback';
-import { qualityLabel, readQualityPreference, resolvePreferredQuality, saveQualityPreference } from '../utils/playback-quality';
+import { qualityLabel, readQualityPreference, resolvePreferredQuality, saveQualityPreference, type QualityPreference } from '../utils/playback-quality';
 import { toggleFullscreen } from '../utils/fullscreen';
 import { DraggableCaption, HiddenSubtitleTrack } from './DraggableCaption';
 import { PlaybackSettingsMenu } from './PlaybackSettingsMenu';
 import { RepeatControl } from './RepeatControl';
 import { PlayerActionMenu } from './PlayerActionMenu';
-import { repeatLabels, type RepeatMode } from '../utils/playback-repeat';
+import { type RepeatMode } from '../utils/playback-repeat';
 import { useBackgroundPlayback } from '../hooks/useBackgroundPlayback';
+import { usePlaybackVolume } from '../hooks/usePlaybackVolume';
 import type { MediaItem, PlaybackInfo } from '../types';
 import '../player-ui.css';
 
@@ -61,6 +62,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
   const { fallback, error, startFallback, release:releaseFallback,needsSeek:needsFallbackSeek } = useHlsFallback(item, videoRef, wantsPlayback, sourceTransition);
   const {state:qualityState,error:qualityError,start:startQuality,selectedQuality,activeQuality,qualityOptions,setQuality,playbackBlocked,release:releaseQuality,needsSeek:needsQualitySeek}=useAdaptiveQuality(item,videoRef,releaseFallback,wantsPlayback,sourceTransition);
   const [qualitySelectionError,setQualitySelectionError] = useState('');
+  const [qualityPreference,setQualityPreference] = useState(()=>readQualityPreference(!localPlayback));
   const [playbackInfo,setPlaybackInfo] = useState<PlaybackInfo|null>(null);
   const [selectedAudio,setSelectedAudio] = useState<number|null>(null);
   const [selectedSubtitle,setSelectedSubtitle] = useState<number|null>(null);
@@ -73,8 +75,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
   const [buffering,setBuffering] = useState(false);
   const [current,setCurrent] = useState(0);
   const [duration,setDuration] = useState(item.duration || 0);
-  const [volume,setVolume] = useState(1);
-  const [muted,setMuted] = useState(false);
+  const {volume,setVolume,muted,setMuted} = usePlaybackVolume();
   const [pip,setPip] = useState(false);
   const [pipSupported,setPipSupported] = useState(false);
   const [singleRepeat,setSingleRepeat] = useState<RepeatMode>('off');
@@ -145,7 +146,9 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
       if(!alive)return;
       setPlaybackInfo(info);
       setSelectedAudio(info.defaultAudioStream);
-      const preferredQuality=resolvePreferredQuality(info.qualityOptions,readQualityPreference(!localPlayback));
+      const preference=readQualityPreference(!localPlayback);
+      setQualityPreference(preference);
+      const preferredQuality=resolvePreferredQuality(info.qualityOptions,preference);
       setQuality(preferredQuality);
       const directPlayback=!info.qualityOptions.length||preferredQuality===null||preferredQuality===info.qualityOptions[0]?.height;
       if(directPlayback){
@@ -309,7 +312,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
 
   useEffect(()=>{
     const video=videoRef.current;
-    if(!buffering||!video||!wantsPlayback.current||video.paused||video.seeking||localPlayback||selectedQuality!==null||!playbackReady||qualityState!=='idle')return;
+    if(!buffering||!video||!wantsPlayback.current||video.paused||video.seeking||localPlayback||qualityPreference!=='auto'||selectedQuality!==null||!playbackReady||qualityState!=='idle')return;
     autoBufferTimer.current=window.setTimeout(()=>{
       autoBufferTimer.current=null;
       if(!wantsPlayback.current||video.paused||video.seeking||video.readyState>=HTMLMediaElement.HAVE_FUTURE_DATA)return;
@@ -322,7 +325,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
       if(autoBufferTimer.current!==null)window.clearTimeout(autoBufferTimer.current);
       autoBufferTimer.current=null;
     };
-  },[buffering,playRequested,localPlayback,playbackReady,qualityState,selectedAudio,selectedQuality,startQuality]);
+  },[buffering,playRequested,localPlayback,playbackReady,qualityState,qualityPreference,selectedAudio,selectedQuality,startQuality]);
 
   function handleWaiting(){
     if(!background.audioIsClock())audioRef.current?.pause();
@@ -544,15 +547,21 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
     }
   }
 
-  async function selectQuality(height:number|null){
+  async function selectQuality(preference:QualityPreference){
     const video=videoRef.current;
     const position=video?.currentTime||current;
-    saveQualityPreference(height);
+    saveQualityPreference(preference);
+    setQualityPreference(preference);
+    const height=resolvePreferredQuality(playbackInfo?.qualityOptions??qualityOptions,preference);
     setQualitySelectionError('');
-    setQuality(height);
-    if(qualityState==='active'||qualityState==='starting')return;
-    if(height===null||height===playbackInfo?.qualityOptions[0]?.height){
+    const original=preference==='source'||(height!==null&&height===playbackInfo?.qualityOptions[0]?.height);
+    if(!original){
+      setQuality(height);
+      if(qualityState==='active'||qualityState==='starting')return;
+    }
+    if(original||height===null){
       releaseQuality();
+      setQuality(height);
       qualityRequested.current=false;
       playbackBlocked.current=false;
       setPlaybackReady(true);
@@ -566,7 +575,8 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
           if(playbackItemId.current!==item.id)return;
           video.currentTime=position;
           sourceTransition.current=false;
-          if(wantsPlayback.current)requestVideoPlayback();
+          if(selectedAudio!==null&&selectedAudio!==playbackInfo?.defaultAudioStream)void prepareAudio(selectedAudio,playbackInfo,true,true);
+          else if(wantsPlayback.current)requestVideoPlayback();
         },{once:true});
         video.src=`/api/media/${item.id}/stream`;video.load();
       }else{
@@ -680,6 +690,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
           selectedSubtitle={selectedSubtitle}
           qualityOptions={qualityOptions.length?qualityOptions:playbackInfo.qualityOptions}
           selectedQuality={selectedQuality}
+          qualityPreference={qualityPreference}
           activeQuality={activeQuality}
           allowAutoQuality={!localPlayback}
           busy={audioPreparing||fallback==='starting'||qualityState==='starting'}
@@ -698,9 +709,9 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
         {label:'Rewind 10 seconds',icon:<Rewind/>,action:()=>seekBy(-10)},
         {label:'Fast-forward 10 seconds',icon:<FastForward/>,action:()=>seekBy(10)},
         {label:muted?'Unmute':'Mute',icon:muted?<SpeakerSlash/>:<SpeakerHigh/>,action:toggleMute},
-        ...(queue?.length?['off','one','queue'] as const:['off','one'] as const).map(mode=>({label:repeatLabels[mode],checked:repeat===mode,action:()=>changeRepeat(mode)})),
-        ...(['quality','audio','subtitles'] as const).filter(setting=>containerRef.current?.querySelector(`[data-setting="${setting}"]`)).map(setting=>({
-          label:setting==='quality'?'Quality':setting==='audio'?'Audio':'Subtitles',action:()=>containerRef.current?.querySelector<HTMLButtonElement>(`[data-setting="${setting}"]`)?.click()
+        {label:'Repeat video',icon:<Repeat/>,checked:repeat==='one',action:()=>changeRepeat(repeat==='one'?'off':'one')},
+        ...(['audio','subtitles'] as const).filter(setting=>containerRef.current?.querySelector(`[data-setting="${setting}"]`)).map(setting=>({
+          label:setting==='audio'?'Audio':'Subtitles',action:()=>containerRef.current?.querySelector<HTMLButtonElement>(`[data-setting="${setting}"]`)?.click()
         })),
         ...(pipSupported?[{label:pip?'Exit Picture in Picture':'Picture in Picture',icon:<PictureInPicture/>,action:()=>void togglePip()}]:[]),
         {label:'Fullscreen',icon:<ArrowsOut/>,action:()=>void fullscreen()}

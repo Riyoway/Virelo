@@ -22,7 +22,7 @@ async function serveMedia(route,body,contentType){
   headers:{'Accept-Ranges':'bytes','Content-Range':'bytes '+start+'-'+end+'/'+body.length}});
 }
 try {
- for(const [mode,base] of [['npm','http://127.0.0.1:5198'],['web','http://127.0.0.1:5199']]){
+ for(const [mode,base] of [['npm',process.env.VIRELO_TEST_NPM_URL||'http://127.0.0.1:5198'],['web',process.env.VIRELO_TEST_WEB_URL||'http://127.0.0.1:5199']]){
  const context=await browser.newContext({serviceWorkers:'block'}),page=await context.newPage(),errors=[];
  page.on('pageerror',e=>errors.push(e.message));
  await page.route('**/__background/**',async route=>{
@@ -64,8 +64,10 @@ try {
  const show=()=>page.evaluate(()=>{window.__hidden=false;document.dispatchEvent(new Event('visibilitychange'));window.dispatchEvent(new Event('focus'));});
  const snapshot=()=>page.locator('.player').evaluate(e=>{const v=e.querySelector('video'),a=e.querySelector('audio');return {videoPaused:v.paused,videoTime:v.currentTime,audioPaused:a.paused,audioTime:a.currentTime,videoSource:v.currentSrc,audioSource:a.currentSrc};});
  await mount(2);await page.waitForFunction(()=>document.querySelector('.player video')?.currentTime>.2);
+ await page.locator('[aria-label="Volume"]').fill('0.25');
  await page.getByRole('button',{name:'Audio',exact:true}).click();await page.getByRole('menuitemradio',{name:/^Alternate/}).click();
  await page.waitForFunction(()=>{const v=document.querySelector('.player video'),a=document.querySelector('.player audio');return v&&!v.paused&&a&&!a.paused&&a.currentTime>.3&&Math.abs(v.currentTime-a.currentTime)<.5;});
+ check(await page.locator('.player').evaluate(e=>e.querySelector('video').volume===.25&&e.querySelector('audio').volume===.25),mode+' saved volume applies to separate converted soundtrack');
  await hide();await page.locator('.player video').evaluate(v=>v.pause());await page.waitForTimeout(700);
  const hidden=await snapshot();console.log('BACKGROUND_PAUSE',mode,JSON.stringify(hidden));
  if(process.env.VIRELO_BACKGROUND_REPRO_ONLY){await context.close();continue;}
@@ -96,6 +98,7 @@ try {
  await page.getByRole('button',{name:'Play',exact:true}).click();await hide();await page.locator('.player video').evaluate(v=>v.pause());await show();
  await page.waitForFunction(()=>!document.querySelector('.player video').paused);
  check(true,mode+' browser-imposed native pause recovers on foreground');
+ await page.getByRole('button',{name:'Mute',exact:true}).click();
  await page.evaluate(async mode=>{
    window.__demoRoot.unmount();document.body.replaceChildren(window.__appRoot);
    const {api}=await import('/src/api.ts');
@@ -105,6 +108,7 @@ try {
  },mode);
  const short=page.locator('.short-video[tabindex="0"]');
  await short.waitFor();await page.waitForFunction(()=>{const v=document.querySelector('.short-video[tabindex="0"]');return v&&!v.paused&&v.currentTime>.2;});
+ check(await short.evaluate(v=>v.volume===.25&&v.muted),mode+' Shorts inherits player volume and mute');
  await hide();await short.evaluate(v=>v.pause());await show();
  await page.waitForFunction(()=>!document.querySelector('.short-video[tabindex="0"]').paused);
  check(true,mode+' active Short recovers from browser background pause');
@@ -114,6 +118,7 @@ try {
  await page.locator('.shorts-scroller').evaluate(e=>{e.scrollTop=e.clientHeight;e.dispatchEvent(new Event('scroll'));});
  await show();await page.waitForFunction(()=>{const v=document.querySelector('.short-video[tabindex="0"]');return v&&!v.paused;});
  check(await page.locator('.short-video').first().evaluate(v=>v.paused),mode+' old Short does not resume after selection changes');
+ check(await short.evaluate(v=>v.volume===.25&&v.muted),mode+' next Short retains volume and mute');
  check(errors.length===0,mode+' no runtime errors '+errors.join('|'));
  await context.close();
  }
