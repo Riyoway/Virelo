@@ -408,10 +408,19 @@ export async function createVireloServer(config: RuntimeConfig) {
   });
   await app.register(fastifyStatic, { root: resolve(config.dataDir, 'cache', 'hls'), prefix: '/hls/', wildcard: true, decorateReply: false, cacheControl: false });
   await app.register(fastifyStatic, { root: resolve(config.dataDir, 'cache', 'audio'), prefix: '/audio/', wildcard: true, decorateReply: false, cacheControl: false });
-  await app.register(fastifyStatic, { root: webRoot, prefix: '/', wildcard: false, decorateReply: true });
+  await app.register(fastifyStatic, {
+    root: webRoot, prefix: '/', wildcard: false, decorateReply: true,
+    setHeaders(reply, path) {
+      if (extname(path).toLowerCase() === '.html' || basename(path) === 'sw.js') reply.header('Cache-Control', 'no-cache');
+    }
+  });
   app.setNotFoundHandler(async (request, reply) => {
-    if (request.url.startsWith('/api/')) return reply.code(404).send({ error: 'Not found' });
-    return reply.type('text/html').sendFile('index.html');
+    const pathname = new URL(request.url, 'http://localhost').pathname;
+    if (/^\/(?:api|assets|hls|audio|playback)(?:\/|$)/.test(pathname)
+      || !['GET', 'HEAD'].includes(request.method) || extname(pathname)) {
+      return reply.code(404).header('Cache-Control', 'no-store').send({ error: 'Not found' });
+    }
+    return reply.type('text/html').header('Cache-Control', 'no-cache').sendFile('index.html');
   });
 
   app.addHook('onClose', async () => {

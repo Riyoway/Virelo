@@ -8,9 +8,10 @@ import { router } from './router';
 import './styles.css';
 import './streaming-ui.css';
 
-if ('serviceWorker' in navigator) {
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    void navigator.serviceWorker.register('/sw.js');
+    void navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })
+      .catch(error => console.warn('Offline caching is unavailable; the app will keep working.', error));
   });
 }
 

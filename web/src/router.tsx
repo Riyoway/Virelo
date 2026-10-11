@@ -1,18 +1,27 @@
-import { lazy, Suspense, type ComponentType, type LazyExoticComponent } from 'react';
 import { createRootRoute, createRoute, createRouter, Outlet } from '@tanstack/react-router';
-import { PageSkeleton, type SkeletonKind } from './components/PageSkeleton';
+import { createRouteView, RouteErrorView, RouteNavigationGuard, RoutePendingView } from './components/RouteRecovery';
 import { Header } from './components/Header';
 import { MobileNav } from './components/MobileNav';
 import { NotFoundView } from './views/NotFoundView';
 import type { SortKey } from './types';
 import { validateShortsSearch } from './utils/shorts-navigation';
 
-const HomeView = lazy(async () => ({ default: (await import('./views/HomeView')).HomeView }));
-const LibraryView = lazy(async () => ({ default: (await import('./views/LibraryView')).LibraryView }));
-const SettingsView = lazy(async () => ({ default: (await import('./views/SettingsView')).SettingsView }));
-const WatchView = lazy(async () => ({ default: (await import('./views/WatchView')).WatchView }));
-const DetailView = lazy(async () => ({ default: (await import('./views/DetailView')).DetailView }));
-const ShortsView = lazy(async () => ({ default: (await import('./views/ShortsView')).ShortsView }));
+const HomeRouteView = createRouteView(() => import('./views/HomeView'), 'HomeView', 'home');
+const LibraryRouteView = createRouteView(() => import('./views/LibraryView'), 'LibraryView', 'library');
+const SettingsRouteView = createRouteView(() => import('./views/SettingsView'), 'SettingsView', 'settings');
+const WatchRouteView = createRouteView(() => import('./views/WatchView'), 'WatchView', 'watch');
+const DetailRouteView = createRouteView(() => import('./views/DetailView'), 'DetailView', 'detail');
+const ShortsRouteView = createRouteView(() => import('./views/ShortsView'), 'ShortsView', 'shorts');
+
+function viewForPath(pathname: string) {
+  const path = pathname.replace(/\/$/, '') || '/';
+  if (path === '/') return HomeRouteView;
+  if (path === '/library') return LibraryRouteView;
+  if (path === '/settings') return SettingsRouteView;
+  if (path === '/shorts') return ShortsRouteView;
+  if (/^\/watch\/[^/]+$/.test(path)) return WatchRouteView;
+  if (/^\/title\/[^/]+$/.test(path)) return DetailRouteView;
+}
 
 export interface WatchRouteSearch {
   queue?: boolean;
@@ -33,23 +42,10 @@ function validateWatchSearch(input: Record<string, unknown>): WatchRouteSearch {
 }
 
 function Shell() {
-  return <div className="app-shell"><Header /><main className="page-shell"><Outlet /></main><MobileNav /></div>;
+  return <div className="app-shell"><RouteNavigationGuard viewForPath={viewForPath} /><Header /><main className="page-shell"><Outlet /></main><MobileNav /></div>;
 }
 
-function withSuspense(View: LazyExoticComponent<ComponentType>, kind: SkeletonKind) {
-  return function SuspendedView() {
-    return <Suspense fallback={<PageSkeleton kind={kind} />}><View /></Suspense>;
-  };
-}
-
-const HomeRouteView = withSuspense(HomeView, 'home');
-const LibraryRouteView = withSuspense(LibraryView, 'library');
-const SettingsRouteView = withSuspense(SettingsView, 'settings');
-const WatchRouteView = withSuspense(WatchView, 'watch');
-const DetailRouteView = withSuspense(DetailView, 'detail');
-const ShortsRouteView = withSuspense(ShortsView, 'shorts');
-
-const rootRoute = createRootRoute({ component: Shell, notFoundComponent: NotFoundView });
+const rootRoute = createRootRoute({ component: Shell, notFoundComponent: NotFoundView, errorComponent: RouteErrorView });
 const indexRoute = createRoute({ getParentRoute:()=>rootRoute, path:'/', component:HomeRouteView });
 const libraryRoute = createRoute({ getParentRoute:()=>rootRoute, path:'/library', component:LibraryRouteView });
 const settingsRoute = createRoute({ getParentRoute:()=>rootRoute, path:'/settings', component:SettingsRouteView });
@@ -57,5 +53,10 @@ const watchRoute = createRoute({ getParentRoute:()=>rootRoute, path:'/watch/$med
 const detailRoute = createRoute({ getParentRoute:()=>rootRoute, path:'/title/$mediaId', component:DetailRouteView });
 const shortsRoute = createRoute({ getParentRoute:()=>rootRoute, path:'/shorts', component:ShortsRouteView, validateSearch:validateShortsSearch });
 const routeTree = rootRoute.addChildren([indexRoute, libraryRoute, settingsRoute, watchRoute, detailRoute, shortsRoute]);
-export const router = createRouter({ routeTree, defaultPreload: 'intent', scrollRestoration: true });
+export const router = createRouter({
+  routeTree, defaultPreload: 'intent', scrollRestoration: true,
+  defaultErrorComponent: RouteErrorView,
+  defaultPendingComponent: () => <RoutePendingView viewForPath={viewForPath} />,
+  defaultPendingMs: 150
+});
 declare module '@tanstack/react-router' { interface Register { router: typeof router } }
