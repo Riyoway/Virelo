@@ -29,4 +29,4 @@ For UI work, verify desktop and mobile layouts, keyboard navigation, reduced-mot
 - Keep user-facing text direct and free of implementation details.
 - Confirm `npm run check` succeeds before requesting review.
 
-By contributing, you agree that your work is licensed under the MIT License included in this repository.
+New contributions are licensed under AGPL-3.0-only, as described in [LICENSE](LICENSE). Include any required copyright and license notices for third-party material. This does not change the terms under which earlier contributions were received.

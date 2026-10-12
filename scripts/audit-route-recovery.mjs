@@ -45,7 +45,7 @@ async function serve(root) {
     let data, extension = extname(path);
     try { data = await readFile(path); }
     catch { if (url.pathname.startsWith('/assets/')) { response.writeHead(404); response.end(); return; } data = await readFile(join(root,'index.html')); extension = '.html'; }
-    response.setHeader('Content-Type', {'.html':'text/html','.js':'text/javascript','.css':'text/css','.png':'image/png','.svg':'image/svg+xml','.ico':'image/x-icon','.woff2':'font/woff2','.webmanifest':'application/manifest+json'}[extension] || 'application/octet-stream');
+    response.setHeader('Content-Type', {'.html':'text/html','.js':'text/javascript','.css':'text/css','.txt':'text/plain','.png':'image/png','.svg':'image/svg+xml','.ico':'image/x-icon','.woff2':'font/woff2','.webmanifest':'application/manifest+json'}[extension] || 'application/octet-stream');
     response.end(data);
   });
   await new Promise(done => server.listen(0,'127.0.0.1',done));
@@ -93,6 +93,20 @@ async function continuity(page, before, label) {
 try {
   for (const [mode,root] of [['npm',npmBuild],['web',webBuild]]) {
     const base = await serve(root), prefix = mode === 'web' ? '/app' : '';
+    const legalContext = await browser.newContext({serviceWorkers:'block'});
+    const legalPage = await legalContext.newPage();
+    await legalPage.goto(base + prefix + '/settings');
+    await legalPage.locator('.settings-legal').waitFor();
+    check(await legalPage.getByRole('link',{name:'Source code',exact:true}).getAttribute('href') === 'https://github.com/Riyoway/' + (mode === 'web' ? 'Virelo-web' : 'Virelo'), mode + ' source offer points to this project');
+    check(await legalPage.getByRole('link',{name:'AGPL-3.0-only',exact:true}).getAttribute('href') === '/LICENSE.txt', mode + ' full local license is accessible from Settings');
+    const licenseResponse = await legalPage.request.get(base + '/LICENSE.txt');
+    check(licenseResponse.status() === 200 && (await licenseResponse.text()).includes('13. Remote Network Interaction'), mode + ' built web distribution includes the full AGPL');
+    for (const width of [1440,390]) {
+      await legalPage.setViewportSize({width,height:900});
+      await legalPage.getByRole('link',{name:'Source code',exact:true}).focus();
+      check(await legalPage.locator('.settings-legal').isVisible() && await legalPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), mode + ' legal links fit and remain usable at ' + width);
+    }
+    await legalContext.close();
     const permanent = await newPage(mode,base);
     const page = permanent.page;
     let blocked = true, requests = [];

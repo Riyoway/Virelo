@@ -12,7 +12,8 @@
     "PRIVACY.md",
     "SECURITY.md",
     "CHANGELOG.md",
-    "LICENSE"
+    "LICENSE",
+    "LICENSES"
   ],
   "scripts": {
     "clean": "node scripts/clean.mjs",
@@ -37,7 +38,7 @@
     "npx"
   ],
   "author": "Riyoway",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Riyoway/virelo.git"

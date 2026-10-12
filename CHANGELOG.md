@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- License the current project and new contributions under AGPL-3.0-only, permit commercial use under its terms, and add in-app source/license links. Preserve previously granted MIT permissions and third-party notices.
+
 ## 0.3.1 — 2026-10-09
 
 - Match route and data-loading skeletons to the real Home, library, player, detail, settings and Shorts layouts, with restrained surfaces and reduced-motion support.
