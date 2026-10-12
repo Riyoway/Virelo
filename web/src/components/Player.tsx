@@ -5,6 +5,7 @@ import { useHlsFallback } from '../hooks/useHlsFallback';
 import { useAdaptiveQuality } from '../hooks/useAdaptiveQuality';
 import { playVideo } from '../utils/media-playback';
 import { qualityLabel, readQualityPreference, resolvePreferredQuality, saveQualityPreference, type QualityPreference } from '../utils/playback-quality';
+import { hasPlaybackTrackPreference, resolvePlaybackTrackSelection, savePlaybackTrackSelection } from '../utils/playback-tracks';
 import { toggleFullscreen } from '../utils/fullscreen';
 import { DraggableCaption, HiddenSubtitleTrack } from './DraggableCaption';
 import { PlaybackSettingsMenu } from './PlaybackSettingsMenu';
@@ -141,11 +142,13 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
 
   useEffect(()=>{
     let alive=true;
-    if(wantsPlayback.current)requestVideoPlayback();
+    if(wantsPlayback.current&&!hasPlaybackTrackPreference('audio'))requestVideoPlayback();
     api.playbackInfo(item.id).then(async(info)=>{
       if(!alive)return;
       setPlaybackInfo(info);
-      setSelectedAudio(info.defaultAudioStream);
+      const audio=resolvePlaybackTrackSelection('audio',info.audioTracks,info.defaultAudioStream);
+      setSelectedAudio(audio);
+      setSelectedSubtitle(resolvePlaybackTrackSelection('subtitles',info.subtitleTracks,null));
       const preference=readQualityPreference(!localPlayback);
       setQualityPreference(preference);
       const preferredQuality=resolvePreferredQuality(info.qualityOptions,preference);
@@ -164,14 +167,18 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
           const position=video?.currentTime||item.progress_position||0;
           sourceTransition.current=true;
           video?.pause();
-          await startFallback(info.defaultAudioStream??undefined,position,wantsPlayback.current);
+          await startFallback(audio??undefined,position,wantsPlayback.current);
+        }else if(audio!==null&&audio!==info.defaultAudioStream){
+          const resume=item.progress_position||0;
+          const position=initialResumeItem.current===item.id?(video?.currentTime||0):resume>5&&(!item.duration||resume<item.duration*.92)?resume:0;
+          await prepareAudio(audio,info,true,true,position);
         }else{
           setPlaybackReady(true);
           if(wantsPlayback.current)requestVideoPlayback();
         }
         return;
       }
-      const adaptiveReady=await startQuality(info.defaultAudioStream??undefined,item.progress_position||0,wantsPlayback.current);
+      const adaptiveReady=await startQuality(audio??undefined,item.progress_position||0,wantsPlayback.current);
       if(!alive)return;
       if(adaptiveReady){
         setPlaybackReady(true);
@@ -481,13 +488,13 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
   async function fullscreen(){const container=containerRef.current;const video=videoRef.current;if(!container||!video)return;await toggleFullscreen(container,video);}
   async function togglePip(){const v=videoRef.current;if(!v||!pipSupported)return;if(document.pictureInPictureElement)await document.exitPictureInPicture();else await v.requestPictureInPicture().catch(()=>{});}
 
-  async function prepareAudio(stream:number,info=playbackInfo,initial=false,skipAdaptive=false){
+  async function prepareAudio(stream:number,info=playbackInfo,initial=false,skipAdaptive=false,resumeAt?:number){
     if(!info||(videoFallbackRequested.current&&fallback!=='active'))return;
     if(!initial&&selectedAudio===stream&&!audioPreparing)return;
     const video=videoRef.current;
     const token=++audioToken.current;
     const shouldResume=wantsPlayback.current;
-    const position=video&&Number.isFinite(video.currentTime)?video.currentTime:current;
+    const position=resumeAt??(video&&Number.isFinite(video.currentTime)?video.currentTime:current);
     const track=info.audioTracks.find((candidate)=>candidate.index===stream);
     const canUseOriginal=stream===info.defaultAudioStream&&Boolean(track&&DIRECT_AUDIO_CODECS.has(track.codec));
     setSelectedAudio(stream);
@@ -545,6 +552,13 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
     }finally{
       if(token===audioToken.current)setAudioPreparing(false);
     }
+  }
+
+  function selectAudio(stream:number){
+    if(playbackInfo&&savePlaybackTrackSelection('audio',playbackInfo.audioTracks,stream))void prepareAudio(stream);
+  }
+  function selectSubtitle(stream:number|null){
+    if(playbackInfo&&savePlaybackTrackSelection('subtitles',playbackInfo.subtitleTracks,stream))setSelectedSubtitle(stream);
   }
 
   async function selectQuality(preference:QualityPreference){
@@ -694,8 +708,8 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
           activeQuality={activeQuality}
           allowAutoQuality={!localPlayback}
           busy={audioPreparing||fallback==='starting'||qualityState==='starting'}
-          onSelectAudio={(stream)=>void prepareAudio(stream)}
-          onSelectSubtitle={setSelectedSubtitle}
+          onSelectAudio={selectAudio}
+          onSelectSubtitle={selectSubtitle}
           onSelectQuality={(height)=>void selectQuality(height)}
         />}
         {pipSupported && <button onClick={()=>void togglePip()} aria-label={pip?'Exit Picture in Picture':'Picture in Picture'} className={pip?'active':''}>{pip?<PictureInPicture weight="fill"/>:<PictureInPicture/>}</button>}

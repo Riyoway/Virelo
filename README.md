@@ -144,6 +144,8 @@ Virelo works without FFmpeg for formats supported by the browser. Installing `ff
 
 Virelo can automatically match filenames to movie and series metadata, then cache posters, backdrops, and episode artwork locally. Configure this from **Settings → Network**. Source video files are never sent to the metadata provider.
 
+Audio and subtitle choices, including subtitle Off, are saved in your browser. Compatible track configurations restore the selected track even if stream IDs or order change. Different configurations use that video's defaults without overwriting the saved choices; ambiguous or unsupported tracks are not guessed.
+
 ## 💾 Data
 
 The default data directory is `~/.virelo`:

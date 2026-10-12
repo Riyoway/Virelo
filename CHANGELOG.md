@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Remember audio and subtitle choices across videos and reloads. Restore compatible track configurations without relying on container stream IDs; fall back to each video's defaults for changed, ambiguous or unsupported tracks without overwriting preferences.
+
 - License the current project and new contributions under AGPL-3.0-only, permit commercial use under its terms, and add in-app source/license links. Preserve previously granted MIT permissions and third-party notices.
 
 ## 0.3.1 — 2026-10-09
