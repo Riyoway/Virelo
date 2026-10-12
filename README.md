@@ -1,15 +1,15 @@
 <div align="center">
-  <img src="https://raw.githubusercontent.com/Riyoway/virelo/main/web/public/virelo-icon-512.png" alt="Virelo" width="128" />
+  <img src="https://raw.githubusercontent.com/VireloHQ/Virelo/main/web/public/virelo-icon-512.png" alt="Virelo" width="128" />
 
   <h1>Virelo</h1>
 
   <p>Turn any folder into a private, streaming-style video library.</p>
 
   <p>
-    <a href="https://github.com/Riyoway/virelo/stargazers"><img src="https://img.shields.io/github/stars/Riyoway/virelo?style=flat-square&logo=github&label=Stars" alt="GitHub stars" /></a>
-    <a href="https://github.com/Riyoway/virelo/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Riyoway/virelo/ci.yml?style=flat-square&logo=github-actions&label=CI" alt="CI status" /></a>
+    <a href="https://github.com/VireloHQ/Virelo/stargazers"><img src="https://img.shields.io/github/stars/VireloHQ/Virelo?style=flat-square&logo=github&label=Stars" alt="GitHub stars" /></a>
+    <a href="https://github.com/VireloHQ/Virelo/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/VireloHQ/Virelo/ci.yml?style=flat-square&logo=github-actions&label=CI" alt="CI status" /></a>
     <a href="https://www.npmjs.com/package/virelo"><img src="https://img.shields.io/npm/v/virelo?style=flat-square&logo=npm&label=npm" alt="npm version" /></a>
-    <a href="https://github.com/Riyoway/virelo/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Riyoway/virelo?style=flat-square&label=License" alt="AGPL-3.0-only license" /></a>
+    <a href="https://github.com/VireloHQ/Virelo/blob/main/LICENSE"><img src="https://img.shields.io/github/license/VireloHQ/Virelo?style=flat-square&label=License" alt="AGPL-3.0-only license" /></a>
   </p>
 
   <p>
@@ -181,8 +181,8 @@ See [SECURITY.md](SECURITY.md) before exposing Virelo beyond the host computer.
 ## 🛠️ Development
 
 ```bash
-git clone https://github.com/Riyoway/virelo.git
-cd virelo
+git clone https://github.com/VireloHQ/Virelo.git
+cd Virelo
 npm ci
 npm run check
 node dist/cli.js --no-open
@@ -233,7 +233,7 @@ Copyright (c) 2026 Virelo contributors.
 
 The current project is licensed under the [GNU Affero General Public License, version 3 only (AGPL-3.0-only)](LICENSE). Commercial use and sale are permitted under its terms. Distribution requires the corresponding source, and modified versions that users access over a network must offer those users the corresponding source at no charge. Private modifications used only by their author do not need to be published.
 
-Source and build instructions are available in [this repository](https://github.com/Riyoway/Virelo). When distributing or hosting a modified build, provide the source and build instructions for that exact build and update the app's source link. Your video files and library data are not subject to this source-code requirement.
+Source and build instructions are available in [this repository](https://github.com/VireloHQ/Virelo). When distributing or hosting a modified build, provide the source and build instructions for that exact build and update the app's source link. Your video files and library data are not subject to this source-code requirement.
 
 This change does not revoke permissions already granted for copies previously released under MIT. The original notice is preserved in [LICENSES/LEGACY-MIT.txt](LICENSES/LEGACY-MIT.txt); it does not license new changes under MIT. Third-party dependencies and assets retain their own licenses and required notices.
 
