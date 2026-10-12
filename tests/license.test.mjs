@@ -40,7 +40,7 @@ test('legacy permissions and contributor copyright notices survive the change', 
 
 test('settings offer the matching project source and a local full license', async () => {
   const settings = await readFile(new URL('../web/src/views/SettingsView.tsx', import.meta.url), 'utf8');
-  const source = pkg.name === 'virelo' ? 'https://github.com/Riyoway/Virelo' : 'https://github.com/Riyoway/Virelo-web';
+  const source = pkg.repository.url.replace(/^git\+/, '').replace(/\.git$/, '');
   assert.ok(settings.includes('href="' + source + '"'));
   assert.ok(settings.includes('href="/LICENSE.txt"'));
   assert.ok(settings.includes('Copyright (c) 2026 Virelo contributors. No warranty.'));
