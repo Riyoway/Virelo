@@ -41,12 +41,12 @@
   "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Riyoway/virelo.git"
+    "url": "git+https://github.com/VireloHQ/Virelo.git"
   },
   "bugs": {
-    "url": "https://github.com/Riyoway/virelo/issues"
+    "url": "https://github.com/VireloHQ/Virelo/issues"
   },
-  "homepage": "https://github.com/Riyoway/virelo#readme",
+  "homepage": "https://github.com/VireloHQ/Virelo#readme",
   "engines": {
     "node": ">=22.16.0"
   },
