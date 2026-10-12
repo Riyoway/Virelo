@@ -1,4 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, MonitorPlay, SpeakerHigh, Subtitles, Waveform } from '@phosphor-icons/react';
 import type { PlaybackQuality, PlaybackTrack } from '../types';
@@ -28,7 +29,8 @@ export function PlaybackSettingsMenu({
   onSelectAudio, onSelectSubtitle, onSelectQuality
 }: PlaybackSettingsMenuProps) {
   const [open,setOpen] = useState<Setting|null>(null);
-  const [placement,setPlacement] = useState({left:0,top:0,width:280,maxHeight:320});
+  const [animateOpen,setAnimateOpen] = useState(false);
+  const [placement,setPlacement] = useState({left:0,top:0,width:280,maxHeight:320,anchor:140,side:'above'});
   const rootRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const focusRequest = useRef<'first'|'last'|'selected'>('selected');
@@ -66,17 +68,20 @@ export function PlaybackSettingsMenu({
       const bounds=controls.getBoundingClientRect(), button=trigger(open)?.getBoundingClientRect();
       if(!button)return;
       const width=Math.min(280,bounds.width-16,window.innerWidth-16);
-      const above=Math.max(48,bounds.top-16), below=Math.max(48,window.innerHeight-bounds.bottom-16);
+      const above=Math.max(0,button.top-22), below=Math.max(0,window.innerHeight-button.bottom-22);
       const desiredHeight=Math.min(320,(menuRef.current?.querySelector('.playback-track-list')?.scrollHeight||0)
-        +(menuRef.current?.querySelector('h3')?.offsetHeight||36)+14);
+        +(menuRef.current?.querySelector('h3')?.offsetHeight||36)+16);
       const placeAbove=above>=desiredHeight||above>=below;
       const maxHeight=Math.min(320,placeAbove?above:below);
       const height=Math.min(desiredHeight,maxHeight);
-      const next={width,maxHeight,
-        left:Math.max(8,Math.min(button.right-width,window.innerWidth-width-8)),
-        top:placeAbove?Math.max(8,bounds.top-height-8):bounds.bottom+8};
+      const left=Math.max(8,Math.min(button.left+button.width/2+28-width,window.innerWidth-width-8));
+      const next={width,maxHeight,left,
+        anchor:Math.max(24,Math.min(button.left+button.width/2-left,width-24)),
+        side:placeAbove?'above':'below',
+        top:placeAbove?Math.max(8,button.top-height-14):button.bottom+14};
       setPlacement(previous=>previous.left===next.left&&previous.top===next.top
-        &&previous.width===next.width&&previous.maxHeight===next.maxHeight?previous:next);
+        &&previous.width===next.width&&previous.maxHeight===next.maxHeight
+        &&previous.anchor===next.anchor&&previous.side===next.side?previous:next);
     };
     position();
     focusOption(focusRequest.current);
@@ -93,8 +98,9 @@ export function PlaybackSettingsMenu({
     };
   },[open]);
 
-  function toggleMenu(setting:Setting){
+  function toggleMenu(setting:Setting,pointer:boolean){
     focusRequest.current='selected';
+    setAnimateOpen(pointer);
     setOpen(value=>value===setting?null:setting);
   }
   function select(action:()=>void){
@@ -105,10 +111,11 @@ export function PlaybackSettingsMenu({
     return <button type="button" data-setting={setting} className={open===setting?'active':''}
       aria-label={label} title={detail?`${label}: ${detail}`:label} aria-haspopup="menu"
       aria-expanded={open===setting} aria-controls={open===setting?menuId:undefined}
-      onClick={()=>toggleMenu(setting)}
+      onClick={event=>toggleMenu(setting,event.detail>0)}
       onKeyDown={event=>{
         if(event.key==='ArrowDown'||event.key==='ArrowUp'){
           event.preventDefault();event.stopPropagation();
+          setAnimateOpen(false);
           focusRequest.current=event.key==='ArrowUp'?'last':'first';
           if(open===setting)focusOption(focusRequest.current);else setOpen(setting);
         }
@@ -129,8 +136,10 @@ export function PlaybackSettingsMenu({
     {qualityOptions.length>0&&settingButton('quality','Quality',<><MonitorPlay/><span className="playback-quality-label">{displayedQuality}</span></>,displayedQuality)}
     {audioTracks.length>1&&settingButton('audio','Audio',<Waveform/>,selectedAudioTrack?trackLabel(selectedAudioTrack,'Audio',selectedAudioTrack.typeIndex+1):undefined)}
     {subtitleTracks.length>0&&settingButton('subtitles','Subtitles',<Subtitles weight={selectedSubtitle===null?'regular':'fill'}/>,selectedSubtitleTrack?trackLabel(selectedSubtitleTrack,'Subtitle',selectedSubtitleTrack.typeIndex+1):'Off')}
-    {open&&createPortal(<div ref={menuRef} id={menuId} className="playback-settings-menu" role="menu" aria-label={label} tabIndex={-1}
-      style={placement}
+    {open&&createPortal(<div key={open} ref={menuRef} id={menuId} className="playback-settings-menu" role="menu" aria-label={label} tabIndex={-1}
+      data-side={placement.side} data-animate={animateOpen}
+      style={{left:placement.left,top:placement.top,width:placement.width,maxHeight:placement.maxHeight,
+        '--popover-anchor-x':`${placement.anchor}px`} as CSSProperties}
       onClick={event=>event.stopPropagation()} onContextMenu={event=>event.preventDefault()}
       onKeyDown={event=>{
         if(event.key==='Tab'){closeMenu(true);return;}

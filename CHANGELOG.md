@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Use softly translucent, rounded speech-bubble menus for playback quality, audio and subtitles, anchored to their toolbar buttons with a short entrance transition. Keep keyboard opening instant and respect reduced motion.
+
 - Remember audio and subtitle choices across videos and reloads. Restore compatible track configurations without relying on container stream IDs; fall back to each video's defaults for changed, ambiguous or unsupported tracks without overwriting preferences.
 
 - License the current project and new contributions under AGPL-3.0-only, permit commercial use under its terms, and add in-app source/license links. Preserve previously granted MIT permissions and third-party notices.

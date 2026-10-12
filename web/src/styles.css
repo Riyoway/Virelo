@@ -319,7 +319,19 @@ button, a, input { -webkit-tap-highlight-color:transparent; }
 .playback-settings { display:flex; align-items:center; gap:4px; flex:none; }
 .playback-settings>button[data-setting="quality"] { display:flex; align-items:center; justify-content:center; gap:6px; width:auto; min-width:38px; padding:0 9px; border-radius:6px; }
 .playback-quality-label { font-size:12px; font-weight:650; font-variant-numeric:tabular-nums; }
-.playback-settings-menu { position:fixed; z-index:150; display:flex; flex-direction:column; overflow:hidden; padding:6px; border:1px solid rgba(255,255,255,.12); border-radius:8px; background:#171719; box-shadow:0 8px 24px rgba(0,0,0,.45); color:var(--text); }
+.playback-settings-menu { position:fixed; z-index:150; display:flex; flex-direction:column; overflow:visible; padding:8px; border:0; border-radius:16px; background:rgba(22,22,25,.86); backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px); box-shadow:0 12px 32px rgba(0,0,0,.32); color:var(--text); transform-origin:var(--popover-anchor-x) bottom; }
+.playback-settings-menu::after { content:''; position:absolute; left:calc(var(--popover-anchor-x) - 11px); bottom:-10px; width:22px; height:10px; background:inherit; clip-path:polygon(0 0,100% 0,50% 100%); pointer-events:none; }
+.playback-settings-menu[data-side="below"] { transform-origin:var(--popover-anchor-x) top; }
+.playback-settings-menu[data-side="below"]::after { top:-10px; bottom:auto; clip-path:polygon(50% 0,100% 100%,0 100%); }
+.playback-settings-menu[data-animate="true"] { transition:opacity 180ms var(--ease-out),transform 180ms var(--ease-out); }
+@starting-style {
+  .playback-settings-menu[data-animate="true"] { opacity:0; transform:translateY(6px) scale(.97); }
+  .playback-settings-menu[data-side="below"][data-animate="true"] { transform:translateY(-6px) scale(.97); }
+}
+@media (prefers-reduced-motion:reduce) {
+  .playback-settings-menu[data-animate="true"] { transition-property:opacity; }
+  @starting-style { .playback-settings-menu[data-animate="true"] { transform:none; } }
+}
 .playback-settings-menu h3 { display:flex; flex:none; align-items:center; gap:8px; margin:0; padding:9px 10px 10px; color:var(--text); font:650 13px/1.2 var(--font-body); }
 .playback-settings-menu h3 svg { width:16px; height:16px; }
 .playback-track-list { display:grid; gap:2px; min-height:0; overflow:auto; overscroll-behavior:contain; scrollbar-width:none; }
