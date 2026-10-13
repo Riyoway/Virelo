@@ -1,0 +1,179 @@
+import { createRequire } from 'node:module';
+import { spawn, execFileSync } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
+import assert from 'node:assert/strict';
+
+const repo = fileURLToPath(new URL('../', import.meta.url));
+const mode = JSON.parse(await readFile(join(repo, 'package.json'), 'utf8')).name === 'virelo' ? 'npm' : 'web';
+const { chromium } = createRequire(process.env.VIRELO_TEST_NODE_PACKAGE || join(repo, 'package.json'))('playwright');
+const clip = execFileSync(process.env.VIRELO_TEST_FFMPEG || 'ffmpeg', [
+  '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=0x334455:s=180x320:r=5:d=60',
+  '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+  '-movflags', 'frag_keyframe+empty_moov', '-f', 'mp4', 'pipe:1'
+], { windowsHide: true });
+const server = spawn(process.execPath, [join(repo, 'node_modules/vite/bin/vite.js'), '--host', '127.0.0.1', '--port', '0'],
+  { cwd: repo, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+let browser;
+try {
+  const base = await new Promise((resolve, reject) => {
+    let output = '';
+    const timer = setTimeout(() => reject(new Error(output)), 20000);
+    server.once('error', reject);
+    server.stderr.on('data', chunk => { output += chunk; });
+    server.stdout.on('data', chunk => {
+      output += String(chunk).replace(/\x1b\[[0-9;]*m/g, '');
+      const url = output.match(/http:\/\/127\.0\.0\.1:\d+/)?.[0];
+      if (url) { clearTimeout(timer); resolve(url); }
+    });
+  });
+  browser = await chromium.launch({ headless: true, executablePath: process.env.VIRELO_TEST_CHROMIUM,
+    args: ['--autoplay-policy=no-user-gesture-required'] });
+  const context = await browser.newContext({ serviceWorkers: 'block' });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.route(base + '/__favorites-audit', route => route.fulfill({
+    contentType: 'text/html', body: '<!doctype html><html><body><div id="fixture"></div></body></html>'
+  }));
+  await page.route('**/__like-clip.mp4', route => route.fulfill({ contentType: 'video/mp4', body: clip }));
+  await page.route('**/api/**', route => route.fulfill(
+    route.request().url().endsWith('/stream') ? { contentType: 'video/mp4', body: clip } : { json: [] }));
+  await page.goto(base + '/__favorites-audit');
+  await page.evaluate(async ({ base, mode }) => {
+    const Refresh = (await import('/@react-refresh')).default;
+    Refresh.injectIntoGlobalHook(window);
+    window.$RefreshReg$ = () => {};
+    window.$RefreshSig$ = () => type => type;
+    window.__vite_plugin_react_preamble_installed__ = true;
+    const main = await (await fetch('/src/main.tsx')).text();
+    const imports = [...main.matchAll(/from ["']([^"']+)["']/g)].map(match => match[1]);
+    const React = (await import(imports.find(url => url.includes('/react.js')))).default;
+    const dom = await import(imports.find(url => url.includes('/react-dom_client.js')));
+    const { QueryClient, QueryClientProvider } = await import(imports.find(url => url.includes('react-query')));
+    const { RouterProvider } = await import(imports.find(url => url.includes('react-router')));
+    const { api } = await import('/src/api.ts');
+    await import('/src/styles.css');
+    await import('/src/streaming-ui.css');
+    const items = Array.from({ length: 107 }, (_, index) => ({
+      id: index + 1, library_id: 1, title: 'Video ' + String(index + 1).padStart(3, '0'), sort_title: String(index),
+      filename: 'clip.mp4', path: 'clip.mp4', folder: '', kind: 'series', series_title: 'One series',
+      season: 1, episode: index + 1, duration: 60, width: index < 6 ? 180 : 320, height: index < 6 ? 320 : 180,
+      liked: index < 6 ? 0 : 1, size: 1, mtime: index, added_at: index, updated_at: index,
+      thumbnail_path: null, poster_path: null, backdrop_path: null, year: null, overview: null, genres: null
+    }));
+    window.__items = items; window.__failLike = false; window.__likeDelay = 0; window.__writes = 0;
+    api.shorts = async () => ({ items: items.slice(0, 6).map(item => ({ ...item })), total: 6 });
+    api.media = async ({ liked, search = '', offset = 0, limit = 500 } = {}) => items
+      .filter(item => (!liked || item.liked) && item.title.toLowerCase().includes(search.toLowerCase()))
+      .slice(offset, offset + limit).map(item => ({ ...item }));
+    api.mediaById = async id => ({ ...items.find(item => item.id === id) });
+    api.setLike = async (id, liked) => {
+      window.__writes++;
+      await new Promise(resolve => setTimeout(resolve, window.__likeDelay));
+      if (window.__failLike) throw new Error('Test save failure');
+      items.find(item => item.id === id).liked = Number(liked);
+      return { ok: true, liked };
+    };
+    api.mediaSource = async () => base + '/__like-clip.mp4';
+    api.mediaFile = async () => new File([await (await fetch(base + '/__like-clip.mp4')).arrayBuffer()], 'clip.mp4', { type: 'video/mp4' });
+    api.progress = async () => {};
+    api.thumbnail = async () => null;
+    api.settings = async () => ({ queueBehavior: 'auto', externalMetadataEnabled: false });
+    api.libraries = async () => [];
+    api.folders = async () => [];
+    api.playbackInfo = async () => ({ audioTracks: [], subtitleTracks: [], qualityOptions: [], defaultAudioStream: null,
+      requiresTranscode: false, requiresAudioTranscode: false, requiresVideoTranscode: false });
+    const client = new QueryClient({ defaultOptions: { queries: { staleTime: 20000, retry: false, refetchOnWindowFocus: false } } });
+    client.setQueryData(['home'], { favorites: [] });
+    window.__client = client;
+    const { router } = await import('/src/router.tsx');
+    window.__router = router;
+    await router.navigate({ to: mode === 'web' ? '/app/shorts' : '/shorts', search: { startId: 1 } });
+    (dom.createRoot || dom.default.createRoot)(document.getElementById('fixture')).render(
+      React.createElement(QueryClientProvider, { client }, React.createElement(RouterProvider, { router })));
+  }, { base, mode });
+  const prefix = mode === 'web' ? '/app' : '';
+  const navigate = async path => page.evaluate(path => window.__router.navigate({ to: path }), prefix + path);
+  const first = page.locator('.short-slot').first();
+  await first.getByRole('button', { name: 'Add to favorites', exact: true }).click();
+  await page.waitForFunction(() => window.__items[0].liked === 1 && window.__client.getQueryData(['home']).favorites.length === 1);
+  assert.equal(await first.getByRole('button', { name: 'Remove from favorites' }).getAttribute('aria-pressed'), 'true');
+  await page.locator('.shorts-scroller').evaluate(element => { element.scrollTop = element.clientHeight * 4; });
+  await first.locator('.short-slot-placeholder').waitFor({ state: 'attached' });
+  await page.locator('.shorts-scroller').evaluate(element => { element.scrollTop = 0; });
+  await first.getByRole('button', { name: 'Remove from favorites' }).waitFor();
+  console.log(mode + ': Shorts remount and Home save state stay synchronized');
+
+  await navigate('/favorites');
+  await page.getByRole('heading', { name: 'Favorites', exact: true }).waitFor();
+  assert.equal(await page.locator('.favorites-view .media-card').count(), 100);
+  await page.getByRole('button', { name: 'Show more' }).click();
+  await page.waitForFunction(() => document.querySelectorAll('.favorites-view .media-card').length === 102);
+  assert.equal(await page.locator('.favorites-view .media-card').count(), 102);
+  await page.getByRole('button', { name: 'Search', exact: true }).click();
+  const search = page.getByRole('textbox', { name: 'Search favorites' });
+  await search.fill('Video 107');
+  await page.waitForFunction(() => document.querySelectorAll('.favorites-view .media-card').length === 1);
+  assert.ok(page.url().includes('/favorites'));
+  await search.fill('');
+  console.log(mode + ': paginated collection preserves every saved episode and supports scoped search');
+
+  await navigate('/title/7');
+  const save = page.locator('.detail-actions').getByRole('button', { name: 'Remove from favorites' });
+  await save.waitFor();
+  await page.evaluate(() => { window.__failLike = true; window.__likeDelay = 150; });
+  await save.click();
+  await page.getByRole('alert').filter({ hasText: 'Could not update favorites' }).waitFor();
+  assert.equal(await save.getAttribute('aria-pressed'), 'true');
+  assert.equal(await page.evaluate(() => window.__items[6].liked), 1);
+  await page.evaluate(() => { window.__failLike = false; window.__likeDelay = 200; });
+  const before = await page.evaluate(() => window.__writes);
+  await page.locator('.detail-actions .favorite-button').evaluate(button => { button.click(); button.click(); });
+  await page.waitForFunction(() => window.__items[6].liked === 0);
+  assert.equal(await page.evaluate(() => window.__writes), before + 1);
+  await page.locator('.detail-actions').getByRole('button', { name: 'Add to favorites' }).click();
+  await page.waitForFunction(() => window.__items[6].liked === 1);
+  console.log(mode + ': landscape save, failure rollback and repeated-click guard pass');
+
+  await navigate('/watch/7');
+  const video = page.locator('.player video').first();
+  await page.waitForFunction(() => { const video = document.querySelector('.player video'); return video && !video.paused && video.currentTime > 0; });
+  await page.evaluate(() => { window.__pauses = 0; document.querySelector('.player video').addEventListener('pause', () => window.__pauses++); });
+  await page.locator('.player').hover();
+  await page.locator('.player-tools').getByRole('button', { name: 'Remove from favorites' }).click();
+  await page.waitForFunction(() => window.__items[6].liked === 0);
+  assert.equal(await video.evaluate(element => element.paused), false);
+  assert.equal(await page.evaluate(() => window.__pauses), 0);
+  console.log(mode + ': saving from the player does not interrupt playback');
+
+  await navigate('/favorites');
+  await page.getByRole('heading', { name: 'Favorites', exact: true }).waitFor();
+  assert.equal(await page.locator('.favorites-view .shorts-card .media-card-art').first().evaluate(element => Math.abs(element.clientWidth / element.clientHeight - 16 / 9) < 0.04), true);
+  await page.locator('.favorites-view .media-card').first().click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Remove from favorites' }).click();
+  await page.waitForFunction(() => window.__items[0].liked === 0 && !document.querySelector('.favorites-view .shorts-card'));
+  console.log(mode + ': card context menu removes the same saved item from the collection');
+
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.locator('.mobile-nav').getByRole('link', { name: 'Favorites' }).waitFor({ state: 'visible' });
+  assert.equal(await page.locator('.mobile-nav a').count(), 5);
+  assert.equal(await page.locator('.mobile-nav').evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length), 5);
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
+  await page.getByRole('button', { name: 'Close search' }).click();
+  assert.equal(await page.locator('.favorites-view .media-card-art').first().evaluate(element => Math.abs(element.clientWidth / element.clientHeight - 16 / 9) < 0.04), true);
+  await page.waitForFunction(() => getComputedStyle(document.querySelector('.header-search-input')).opacity === '0');
+  for (const width of [320, 375, 900, 1024, 1440]) {
+    await page.setViewportSize({ width, height: 812 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false, 'viewport ' + width);
+  }
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.screenshot({ path: process.env.VIRELO_TEST_SCREENSHOT || join(repo, 'node_modules/.cache/favorites-mobile.png') });
+  assert.deepEqual(errors, []);
+  console.log(mode + ': mobile layout, navigation and runtime checks pass');
+  await context.close();
+} finally {
+  if (browser) await browser.close();
+  server.kill();
+}

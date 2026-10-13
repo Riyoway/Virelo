@@ -81,7 +81,7 @@ export function buildHome<T extends HomeMedia>(items:T[],now=Date.now()) {
     recent,
     continueWatching:uniqueTitles(items.filter(item=>(item.progress_position||0)>10&&!completed(item))
       .sort((a,b)=>(b.progress_updated_at??b.updated_at)-(a.progress_updated_at??a.updated_at)),20),
-    favorites:uniqueTitles(newest.filter(item=>item.liked)),
+    favorites:newest.filter(item=>item.liked).slice(0,24),
     movies,
     series:shows.slice(0,24),
     nextEpisodes:nextEpisodes.slice(0,12),

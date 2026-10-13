@@ -8,6 +8,8 @@ export function Header() {
   const navigate = useNavigate();
   const pathname = useLocation({select:location=>location.pathname});
   const isHome = pathname === '/';
+  const isFavorites = pathname === '/favorites';
+  const searchDestination = isFavorites ? '/favorites' : '/library';
   const homeFilter = useUIStore(s=>s.homeFilter);
   const setHomeFilter = useUIStore(s=>s.setHomeFilter);
   const search = useUIStore((s)=>s.search);
@@ -24,7 +26,7 @@ export function Header() {
   const toggleSearch = () => {
     const nextOpen = !searchOpen;
     setMobileSearchOpen(nextOpen);
-    if (nextOpen) void navigate({to:'/library'});
+    if (nextOpen) void navigate({to:searchDestination});
   };
   return (
     <header className={'topbar'+(isHome?' home-header':'')}>
@@ -39,6 +41,7 @@ export function Header() {
             <button className="home-header-category" aria-pressed={homeFilter==='series'} onClick={()=>setHomeFilter('series')}>Series</button></>}
           <Link to="/library" activeProps={{className:'active'}}>Library</Link>
           <Link to="/shorts" search={{}} activeProps={{className:'active'}}>Shorts</Link>
+          <Link to="/favorites" activeProps={{className:'active'}}>Favorites</Link>
         </nav>
         <div className="topbar-actions">
           <div className={`header-search-shell ${searchOpen ? 'open' : ''}`}>
@@ -55,14 +58,14 @@ export function Header() {
               </Button>
               <Input
                 className="header-search-input"
-                aria-label="Search library"
+                aria-label={isFavorites ? 'Search favorites' : 'Search library'}
                 placeholder="Search"
                 value={search}
                 ref={searchInputRef}
                 tabIndex={searchOpen ? 0 : -1}
                 onChange={(e)=>setSearch(e.target.value)}
                 onKeyDown={(e)=>{
-                  if (e.key === 'Enter') void navigate({to:'/library'});
+                  if (e.key === 'Enter') void navigate({to:searchDestination});
                   if (e.key === 'Escape') setMobileSearchOpen(false);
                 }}
               />

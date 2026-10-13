@@ -7,6 +7,7 @@ import type { SortKey } from './types';
 import { validateShortsSearch } from './utils/shorts-navigation';
 
 const HomeRouteView = createRouteView(() => import('./views/HomeView'), 'HomeView', 'home');
+const FavoritesRouteView = createRouteView(() => import('./views/FavoritesView'), 'FavoritesView', 'library');
 const LibraryRouteView = createRouteView(() => import('./views/LibraryView'), 'LibraryView', 'library');
 const SettingsRouteView = createRouteView(() => import('./views/SettingsView'), 'SettingsView', 'settings');
 const WatchRouteView = createRouteView(() => import('./views/WatchView'), 'WatchView', 'watch');
@@ -16,6 +17,7 @@ const ShortsRouteView = createRouteView(() => import('./views/ShortsView'), 'Sho
 function viewForPath(pathname: string) {
   const path = pathname.replace(/\/$/, '') || '/';
   if (path === '/') return HomeRouteView;
+  if (path === '/favorites') return FavoritesRouteView;
   if (path === '/library') return LibraryRouteView;
   if (path === '/settings') return SettingsRouteView;
   if (path === '/shorts') return ShortsRouteView;
@@ -48,11 +50,12 @@ function Shell() {
 const rootRoute = createRootRoute({ component: Shell, notFoundComponent: NotFoundView, errorComponent: RouteErrorView });
 const indexRoute = createRoute({ getParentRoute:()=>rootRoute, path:'/', component:HomeRouteView });
 const libraryRoute = createRoute({ getParentRoute:()=>rootRoute, path:'/library', component:LibraryRouteView });
+const favoritesRoute = createRoute({ getParentRoute:()=>rootRoute, path:'/favorites', component:FavoritesRouteView });
 const settingsRoute = createRoute({ getParentRoute:()=>rootRoute, path:'/settings', component:SettingsRouteView });
 const watchRoute = createRoute({ getParentRoute:()=>rootRoute, path:'/watch/$mediaId', component:WatchRouteView, validateSearch: validateWatchSearch });
 const detailRoute = createRoute({ getParentRoute:()=>rootRoute, path:'/title/$mediaId', component:DetailRouteView });
 const shortsRoute = createRoute({ getParentRoute:()=>rootRoute, path:'/shorts', component:ShortsRouteView, validateSearch:validateShortsSearch });
-const routeTree = rootRoute.addChildren([indexRoute, libraryRoute, settingsRoute, watchRoute, detailRoute, shortsRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, libraryRoute, favoritesRoute, settingsRoute, watchRoute, detailRoute, shortsRoute]);
 export const router = createRouter({
   routeTree, defaultPreload: 'intent', scrollRestoration: true,
   defaultErrorComponent: RouteErrorView,

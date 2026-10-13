@@ -2,11 +2,13 @@ import { PageSkeleton } from '../components/PageSkeleton';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { useNavigate, useSearch } from '@tanstack/react-router';
-import { ArrowDown, ArrowLeft, Heart, PictureInPicture, SpeakerHigh, SpeakerSlash, SpinnerGap } from '@phosphor-icons/react';
+import { ArrowDown, ArrowLeft, PictureInPicture, SpeakerHigh, SpeakerSlash, SpinnerGap } from '@phosphor-icons/react';
 import { api } from '../api';
 import { playVideo } from '../utils/media-playback';
 import { useBackgroundPlayback } from '../hooks/useBackgroundPlayback';
 import { usePlaybackVolume } from '../hooks/usePlaybackVolume';
+import { useFavorite } from '../hooks/useFavorite';
+import { FavoriteButton } from '../components/FavoriteButton';
 import { MediaContextMenu } from '../components/MediaContextMenu';
 import { useHlsFallback } from '../hooks/useHlsFallback';
 import type { ShortItem } from '../types';
@@ -149,8 +151,7 @@ function ShortsClip({ item, active, onSkip, pipOn, onPip }: { item: ShortItem; a
   const { fallback, error, startFallback } = useHlsFallback(item, videoRef, wantsPlayback);
   const lastReport = useRef(0);
   const {volume,muted,setMuted} = usePlaybackVolume();
-  const [liked, setLiked] = useState(item.liked === 1);
-  const [likeBusy, setLikeBusy] = useState(false);
+  const { favorite: liked, toggle: toggleFavorite } = useFavorite(item);
   const [pip, setPip] = useState(false);
   const [pipSupported, setPipSupported] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -269,16 +270,6 @@ function ShortsClip({ item, active, onSkip, pipOn, onPip }: { item: ShortItem; a
     void api.progress(item.id, Math.min(duration, Math.max(0, value)), duration);
   }
 
-  function toggleLike() {
-    if (likeBusy) return;
-    setLikeBusy(true);
-    const next = !liked;
-    setLiked(next);
-    void api.setLike(item.id, next)
-      .catch(() => setLiked(!next))
-      .finally(() => setLikeBusy(false));
-  }
-
   function clearLongPress() {
     if (longPressTimer.current !== null) {
       window.clearTimeout(longPressTimer.current);
@@ -388,7 +379,7 @@ function ShortsClip({ item, active, onSkip, pipOn, onPip }: { item: ShortItem; a
         position={menuPosition}
         returnFocus={videoRef.current}
         favorite={liked}
-        onFavorite={toggleLike}
+        onFavorite={() => void toggleFavorite()}
         onPlay={() => { wantsPlayback.current = true; resumeBackground(); }}
         onDetails={() => void navigate({to:'/title/$mediaId',params:{mediaId:String(item.id)}})}
         onClose={() => setMenuPosition(null)}
@@ -398,10 +389,7 @@ function ShortsClip({ item, active, onSkip, pipOn, onPip }: { item: ShortItem; a
           {muted ? <SpeakerSlash weight="fill" /> : <SpeakerHigh weight="fill" />}
           <span>{muted ? 'Unmute' : 'Mute'}</span>
         </button>
-        <button className={liked ? 'liked' : ''} onClick={() => void toggleLike()} aria-label={liked ? 'Unlike' : 'Like'}>
-          <Heart weight={liked ? 'fill' : 'regular'} />
-          <span>{liked ? 'Liked' : 'Like'}</span>
-        </button>
+        <FavoriteButton item={item} short />
         {pipSupported && <button className={pip ? 'on' : ''} onClick={togglePip} aria-label={pip ? 'Exit Picture in Picture' : 'Picture in Picture'}>
           <PictureInPicture weight={pip ? 'fill' : 'regular'} />
           <span>PiP</span>

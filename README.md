@@ -73,7 +73,7 @@ npx virelo --media "C:\Users\You\Videos" --random-port
 | 📚 | **Library** | Recursive scanning, folders, search, and sorting. |
 | ▶️ | **Playback** | Range streaming, seeking, watch progress, and queue controls. |
 | 📱 | **Shorts** | A vertical feed for portrait videos with swipe-friendly controls. |
-| 💜 | **Favorites** | Save videos for quick access from the library. |
+| 💜 | **Favorites** | Save videos and Shorts with the heart; browse every saved item in Favorites. |
 | 🖼️ | **Artwork** | Automatic movie and series metadata, posters, backdrops, and episode images. |
 | 🌐 | **Responsive UI** | Works on desktop, tablet, and mobile screens. |
 | 📦 | **PWA** | Install Virelo as an app when supported by your browser. |

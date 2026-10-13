@@ -4,6 +4,10 @@ import {buildHome,distinctDiscoveryShelves,mediaGenres,moviesOutsideRecent} from
 const item=(id,patch={})=>({id,library_id:1,title:'Title '+id,kind:'movie',series_title:null,season:null,episode:null,
   duration:7200,width:1920,height:1080,genres:null,added_at:id,updated_at:id,...patch});
 const episode=(id,n,patch={})=>item(id,{kind:'series',series_title:'A series',season:1,episode:n,duration:1200,...patch});
+test('favorites preserve each liked episode rather than collapsing a series', () => {
+  assert.deepEqual(buildHome([episode(1, 1, { liked: 1 }), episode(2, 2, { liked: 1 })]).favorites.map(value => value.id), [2, 1]);
+});
+
 test('series shelves use one title and continue from the next numbered episode',()=>{
   const data=buildHome([episode(1,1,{progress_completed:1}),episode(2,2),episode(3,3),episode(4,0,{season:0})]);
   assert.equal(data.series.length,1);assert.equal(data.series[0].id,2);

@@ -1,8 +1,8 @@
 import { Link, useNavigate } from '@tanstack/react-router';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useFavorite } from '../hooks/useFavorite';
 import { Play } from '@phosphor-icons/react';
 import { useEffect, useRef, useState, type MouseEvent, type PointerEvent } from 'react';
-import { api, artwork } from '../api';
+import { artwork } from '../api';
 import type { MediaItem } from '../types';
 import { PreviewPlayer } from './PreviewPlayer';
 import { MediaContextMenu } from './MediaContextMenu';
@@ -11,24 +11,11 @@ const HOVER_CAPABLE = typeof window !== 'undefined' && window.matchMedia('(hover
 
 export function MediaCard({item, compact=false, short=false, playDirect=false, preview=false, onHoverChange, layout='auto'}:{item:MediaItem;layout?:'auto'|'landscape'|'poster';compact?:boolean;short?:boolean;playDirect?:boolean;preview?:boolean;onHoverChange?:(hovered:boolean)=>void}) {
   const navigate = useNavigate();
-  const client = useQueryClient();
+  const { favorite, error: favoriteError, toggle: toggleFavorite } = useFavorite(item);
   const cardRef = useRef<HTMLAnchorElement>(null);
   const [menuPosition, setMenuPosition] = useState<{x:number;y:number}|null>(null);
-  const [favorite, setFavorite] = useState(Boolean(item.liked));
   const longPressTimer = useRef<number | null>(null);
   const longPressTriggered = useRef(false);
-  const favoriteMutation = useMutation({
-    mutationFn: (liked:boolean) => api.setLike(item.id, liked),
-    onSuccess: (result) => {
-      setFavorite(result.liked);
-      void client.invalidateQueries({queryKey:['home']});
-      void client.invalidateQueries({queryKey:['favorites']});
-      void client.invalidateQueries({queryKey:['media']});
-      void client.invalidateQueries({queryKey:['shorts']});
-    },
-    onError: () => setFavorite((current) => !current)
-  });
-  useEffect(() => setFavorite(Boolean(item.liked)), [item.liked]);
   useEffect(() => () => {
     if (longPressTimer.current !== null) window.clearTimeout(longPressTimer.current);
   }, []);
@@ -91,12 +78,13 @@ export function MediaCard({item, compact=false, short=false, playDirect=false, p
         <strong title={item.title}>{item.title}</strong>
         {(progressLabel || details) && <span>{progressLabel || details}</span>}
       </div>
+      {favoriteError && <span className="error-copy" role="alert">{favoriteError}</span>}
       {menuPosition && <MediaContextMenu
         item={{...item, liked: favorite ? 1 : 0}}
         position={menuPosition}
         returnFocus={cardRef.current}
         favorite={favorite}
-        onFavorite={() => { const next = !favorite; setFavorite(next); favoriteMutation.mutate(next); }}
+        onFavorite={() => void toggleFavorite()}
         onPlay={goToPlayback}
         onDetails={goToDetails}
         onClose={() => setMenuPosition(null)}

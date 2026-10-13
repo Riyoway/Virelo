@@ -35,6 +35,25 @@
 .app-shell .brand { font-size:25px; }
 .app-shell .brand-mark { width:38px; height:38px; }
 .app-shell .settings-button svg { width:22px!important; height:22px!important; }
+.favorite-button { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-width:44px; min-height:44px; padding:10px 16px; border:0; border-radius:4px; background:var(--surface-3,#2a2a2e); color:var(--text,#f5f5f7); font:inherit; font-weight:600; cursor:pointer; }
+.favorite-button svg { width:22px; height:22px; flex-shrink:0; }
+.player-tools>button.favorite-button.saved { color:var(--color-brand); }
+.favorite-button.saved { color:var(--color-brand); }
+.favorite-button:disabled { cursor:wait; opacity:.65; }
+.favorite-button:focus-visible { outline:2px solid var(--color-focus); outline-offset:2px; }
+.favorite-error { color:#ffb4ab; font-size:13px; }
+.player-tools .favorite-error,.short-actions .favorite-error { position:absolute; right:12px; bottom:70px; width:min(280px,75vw); padding:12px; background:#18181b; border-radius:6px; }
+.favorites-empty { padding:64px 0; color:var(--text-muted); }
+.favorites-empty h2 { color:var(--text); font-size:22px; margin-bottom:12px; }
+.favorites-empty a { display:inline-block; margin-top:20px; text-decoration:underline; text-underline-offset:4px; }
+.app-shell .favorites-view .shorts-card.art-portrait .media-card-art { aspect-ratio:16/9; }
+.app-shell .favorites-view .shorts-card.art-portrait .media-card-art img { object-fit:contain; }
+.favorites-more { display:flex; justify-content:center; padding:32px 0; }
+.favorites-feedback { padding-bottom:24px; }
+@media(max-width:900px) {
+  .app-shell .mobile-nav { grid-template-columns:repeat(5,minmax(0,1fr)); }
+  .app-shell .header-search-shell { --search-expanded-width:min(300px,calc(100vw - 175px)); }
+}
 .app-shell .content-view { max-width:1680px; padding-inline:var(--app-gutter); }
 .app-shell .content-heading h1 { font-size:clamp(30px,3vw,44px); line-height:1.15; letter-spacing:-.035em; font-weight:600; }
 .app-shell .content-heading p { font-size:14px; }

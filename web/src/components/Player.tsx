@@ -8,6 +8,7 @@ import { qualityLabel, readQualityPreference, resolvePreferredQuality, saveQuali
 import { hasPlaybackTrackPreference, resolvePlaybackTrackSelection, savePlaybackTrackSelection } from '../utils/playback-tracks';
 import { toggleFullscreen } from '../utils/fullscreen';
 import { DraggableCaption, HiddenSubtitleTrack } from './DraggableCaption';
+import { FavoriteButton } from './FavoriteButton';
 import { PlaybackSettingsMenu } from './PlaybackSettingsMenu';
 import { RepeatControl } from './RepeatControl';
 import { PlayerActionMenu } from './PlayerActionMenu';
@@ -697,6 +698,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
         {queue && queueIndex!==undefined && <span className="player-queue">{queueIndex+1} / {queue.length}</span>}
         </div>
         <div className="player-tools">
+        <FavoriteButton item={item} iconOnly />
         {playbackInfo&&<PlaybackSettingsMenu key={item.id}
           audioTracks={playbackInfo.audioTracks}
           subtitleTracks={playbackInfo.subtitleTracks}

@@ -92,7 +92,7 @@ function FilteredHome({filter}:{filter:HomeFilter}) {
       <MediaRow title="Continue watching" items={pick(data.continueWatching)} playDirect/>
       <MediaRow title="Up next" items={pick(data.nextEpisodes)} playDirect/>
       <MediaRow title="Not watched yet" items={unwatched} poster/>
-      <MediaRow title="Your favorites" items={pick(data.favorites)} poster/>
+      <MediaRow title="Your favorites" items={pick(data.favorites)} poster action={<Link to="/favorites">View all</Link>}/>
       <MediaRow title="Recently added" items={pick(data.recent)}/>
       {filter!=='series'&&<MediaRow title="A movie in 90 minutes" items={quickWatches} poster/>}
       {filter!=='movie'&&<MediaRow title="Your series" items={series} poster seriesTitles/>}
