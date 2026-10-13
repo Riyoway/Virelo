@@ -1,5 +1,5 @@
 import {createRequire} from 'node:module';
-import {mkdtemp} from 'node:fs/promises';
+import {mkdtemp,readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -81,6 +81,17 @@ try {
    }
    root.render(h(Demo));
   },mode);
+  if(process.env.VIRELO_TEST_BUILT_CSS==='1'){
+   const dist=join(fileURLToPath(new URL('../../',import.meta.url)),mode==='web'?'virelo-web/dist':'virelo/dist/web');
+   const html=await readFile(join(dist,'index.html'),'utf8');
+   const asset=html.match(/href="(\/assets\/index-[^"]+\.css)"/)?.[1];
+   assert.ok(asset,'build the project before auditing production CSS');
+   const css=await readFile(join(dist,asset.slice(1)),'utf8');
+   await page.evaluate(css=>{
+    document.querySelectorAll('style,link[rel="stylesheet"]').forEach(node=>node.remove());
+    const style=document.createElement('style');style.textContent=css;document.head.append(style);
+   },css);
+  }
   const trigger=label=>page.getByRole('button',{name:label,exact:true});
   const menu=label=>page.getByRole('menu',{name:label,exact:true});
   await trigger('Quality').waitFor();
@@ -96,8 +107,8 @@ try {
    check(await menu(label).evaluate(e=>e.dataset.animate==='true'&&getComputedStyle(e).transitionDuration==='0.18s, 0.18s'),mode+' pointer opening has a short transition '+label);
    check(await menu(label).evaluate(e=>{
     const style=getComputedStyle(e);
-    return style.backgroundColor==='rgba(22, 22, 25, 0.86)'&&style.borderWidth==='0px'&&style.backdropFilter==='blur(16px)';
-   }),mode+' translucent bubble without a decorative border '+label);
+    return style.backgroundColor==='rgba(24, 24, 28, 0.9)'&&style.borderWidth==='0px'&&style.backdropFilter==='blur(18px)';
+   }),mode+' frosted bubble with working blur and no decorative border '+label);
    if(label==='Quality'){
     await menu(label).evaluate(e=>Promise.all(e.getAnimations().map(animation=>animation.finished)));
     await page.screenshot({path:join(screenshots,mode+'-quality.png')});
