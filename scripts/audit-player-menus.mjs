@@ -1,5 +1,5 @@
 import {createRequire} from 'node:module';
-import {mkdtemp,readFile} from 'node:fs/promises';
+import {mkdtemp,readFile,readdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -86,7 +86,8 @@ try {
    const html=await readFile(join(dist,'index.html'),'utf8');
    const asset=html.match(/href="(\/assets\/index-[^"]+\.css)"/)?.[1];
    assert.ok(asset,'build the project before auditing production CSS');
-   const css=await readFile(join(dist,asset.slice(1)),'utf8');
+   const watchStyles=(await readdir(join(dist,'assets'))).filter(name=>/^WatchView-.*\.css$/.test(name));
+   const css=[await readFile(join(dist,asset.slice(1)),'utf8'),...await Promise.all(watchStyles.map(name=>readFile(join(dist,'assets',name),'utf8')))].join('\n');
    await page.evaluate(css=>{
     document.querySelectorAll('style,link[rel="stylesheet"]').forEach(node=>node.remove());
     const style=document.createElement('style');style.textContent=css;document.head.append(style);
@@ -175,6 +176,95 @@ try {
   check(await trigger('Audio').count()===0&&await trigger('Subtitles').count()===0,mode+' unavailable track controls omitted');
   await trigger('Quality').click();
   check(await menu('Quality').getByRole('menuitemradio').count()===2&&await menu('Quality').getByRole('menuitemradio',{name:/^Original Quality/}).count()===1,mode+' Original Quality remains distinct from the sole fixed resolution');
+
+  await page.keyboard.press('Escape');
+  await page.evaluate(async()=>{
+   const main=await(await fetch('/src/main.tsx')).text();
+   const imports=[...main.matchAll(/from ["']([^"']+)["']/g)].map(match=>match[1]);
+   const React=(await import(imports.find(url=>url.includes('/react.js')))).default;
+   const {createRoot}=(await import(imports.find(url=>url.includes('/react-dom_client.js')))).default;
+   const {MediaContextMenu}=await import('/src/components/MediaContextMenu.tsx');
+   const {PlayerActionMenu}=await import('/src/components/PlayerActionMenu.tsx');
+   const {Pause,Rewind,FastForward,SpeakerHigh,Repeat,PictureInPicture,ArrowsOut}=await import('/@id/@phosphor-icons/react');
+   document.body.replaceChildren();
+   const node=document.createElement('div');document.body.append(node);
+   window.__contextCount=0;window.__contextActions=0;
+   const h=React.createElement;
+   function ContextDemo(){
+    const [menu,setMenu]=React.useState(null),surface=React.useRef(null);
+    window.__openContext=(kind,x,y,keyboard=false)=>setMenu({kind,position:{x,y,keyboard}});
+    const choose=()=>window.__contextActions++;
+    const actions=[['Pause',Pause],['Rewind 10 seconds',Rewind],['Fast-forward 10 seconds',FastForward],
+      ['Mute',SpeakerHigh],['Repeat video',Repeat],['Picture in Picture',PictureInPicture],['Fullscreen',ArrowsOut]]
+      .map(([label,Icon],index)=>({label,icon:h(Icon),action:choose,disabled:index===1,checked:index===4?true:undefined}));
+    return h('div',{ref:surface,id:'context-surface',tabIndex:0,'aria-label':'Context menu target',
+      style:{width:'100vw',height:'100dvh',background:'repeating-linear-gradient(45deg,#66523c 0px,#66523c 70px,#202b38 70px,#202b38 140px)'},
+      onContextMenu:event=>{event.preventDefault();window.__contextCount++;setMenu({kind:window.__contextKind||'media',position:{x:event.clientX,y:event.clientY}});}},
+      menu&&(menu.kind==='media'?h(MediaContextMenu,{position:menu.position,item:{id:1,title:'At World’s END'},
+        favorite:false,onFavorite:choose,onPlay:choose,onDetails:choose,returnFocus:surface.current,onClose:()=>setMenu(null)}):
+        h(PlayerActionMenu,{position:menu.position,label:'Video actions',actions,returnFocus:surface.current,onClose:()=>setMenu(null)})));
+   }
+   createRoot(node).render(h(ContextDemo));
+  });
+  const contextMenu=()=>page.locator('.context-popover');
+  for(const kind of ['media','player']){
+   await page.evaluate(kind=>window.__contextKind=kind,kind);
+   for(const viewport of [{width:1440,height:900},{width:320,height:780},{width:844,height:390},{width:320,height:240}]){
+    await page.setViewportSize(viewport);
+    for(const point of [{x:48,y:48},{x:viewport.width-24,y:viewport.height-24},{x:viewport.width/2,y:viewport.height/2}]){
+     await page.locator('#context-surface').click({button:'right',position:point});
+     await contextMenu().evaluate(e=>Promise.all(e.getAnimations().map(animation=>animation.finished)));
+     const rect=await contextMenu().boundingBox();
+     check(kind!=='player'||Math.abs(rect.width-224)<1,mode+' player context uses its compact vertical layout');
+     check(kind!=='player'||await contextMenu().getByRole('menuitem').evaluateAll(buttons=>buttons.every(button=>getComputedStyle(button).display==='flex')),
+       mode+' player context items retain their row styling');
+     check(rect.x>=15&&rect.y>=15&&rect.x+rect.width<=viewport.width-15&&rect.y+rect.height<=viewport.height-15,
+       mode+' '+kind+' context bubble stays inside '+viewport.width+'x'+viewport.height+' at '+point.x+','+point.y);
+     check(await contextMenu().evaluate(e=>{
+      const style=getComputedStyle(e),tail=getComputedStyle(e,'::after');
+      return style.backdropFilter==='blur(18px)'&&style.borderWidth==='0px'&&style.borderRadius==='16px'
+        &&style.overflow==='visible'&&tail.content!=='none'&&tail.height==='10px';
+     }),mode+' '+kind+' context bubble has readable blur and an unclipped tail');
+     check(await contextMenu().evaluate((e,point)=>{
+      const rect=e.getBoundingClientRect(),tail=getComputedStyle(e,'::after');
+      const tipX=rect.left+parseFloat(tail.left)+parseFloat(tail.width)/2;
+      const target=Math.max(rect.left+24,Math.min(point.x,rect.right-24));
+      const tipY=rect.top+parseFloat(tail.top)+(e.dataset.side==='above'?10:0);
+      return Math.abs(tipX-target)<1&&tipY>=0&&tipY<=innerHeight;
+     },point),mode+' '+kind+' context tail follows its click with safe edge clamping');
+     if(viewport.height===240&&point.y===viewport.height/2){
+      const content=contextMenu().locator('.context-popover-content');
+      check(await content.evaluate(e=>e.scrollHeight>e.clientHeight),mode+' '+kind+' tall context list scrolls on short screens');
+      await content.evaluate(e=>{e.scrollTop=e.scrollHeight;});
+      check(await contextMenu().count()===1,mode+' internal context scrolling does not close the menu');
+     }
+     if(viewport.width===1440&&point.y===48)await page.screenshot({path:join(screenshots,mode+'-'+kind+'-context.png')});
+     await page.keyboard.press('Escape');
+     check(await contextMenu().count()===0&&await page.locator('#context-surface').evaluate(e=>e===document.activeElement),
+       mode+' '+kind+' Escape restores focus');
+    }
+   }
+   await page.setViewportSize({width:1440,height:900});
+   await page.evaluate(kind=>window.__openContext(kind,500,300,true),kind);
+   check(await contextMenu().evaluate(e=>e.dataset.animate==='false'&&getComputedStyle(e).transitionDuration==='0s'),
+     mode+' '+kind+' keyboard context opening is instant');
+   await page.keyboard.press('End');await page.keyboard.press('Enter');
+   check(await contextMenu().count()===0,mode+' '+kind+' keyboard action remains available');
+   await page.emulateMedia({reducedMotion:'reduce'});
+   await page.locator('#context-surface').click({button:'right',position:{x:400,y:300}});
+   check(await contextMenu().evaluate(e=>getComputedStyle(e).transitionProperty==='opacity'&&getComputedStyle(e).transform==='none'),
+     mode+' '+kind+' context reduced motion only fades');
+   await page.keyboard.press('Escape');await page.emulateMedia({reducedMotion:'no-preference'});
+   await page.locator('#context-surface').evaluate(e=>e.requestFullscreen());
+   await page.locator('#context-surface').click({button:'right',position:{x:400,y:300}});
+   check(await contextMenu().evaluate(e=>document.fullscreenElement?.contains(e)),mode+' '+kind+' context portal works in fullscreen');
+   const opened=await page.evaluate(()=>window.__contextCount);
+   await contextMenu().getByRole('menuitem').first().click({button:'right'});
+   check(await page.evaluate(()=>window.__contextCount)===opened&&await contextMenu().count()===1,
+     mode+' '+kind+' menu does not open another context menu on itself');
+   await page.keyboard.press('Escape');await page.evaluate(()=>document.exitFullscreen());
+  }
+
   check(errors.length===0,mode+' no runtime errors '+errors.join('|'));
   await context.close();
  }

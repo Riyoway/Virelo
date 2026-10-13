@@ -36,6 +36,7 @@
 .app-shell .brand-mark { width:38px; height:38px; }
 .app-shell .settings-button svg { width:22px!important; height:22px!important; }
 .favorite-button { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-width:44px; min-height:44px; padding:10px 16px; border:0; border-radius:4px; background:var(--surface-3,#2a2a2e); color:var(--text,#f5f5f7); font:inherit; font-weight:600; cursor:pointer; }
+.favorite-button .favorite-icon { display:inline-flex; align-items:center; justify-content:center; flex:none; line-height:0; transform-origin:center; }
 .favorite-button svg { width:22px; height:22px; flex-shrink:0; }
 .player-tools>button.favorite-button.saved { color:var(--color-brand); }
 .favorite-button.saved { color:var(--color-brand); }
@@ -217,7 +218,6 @@
 .app-shell .short-progress::-moz-range-track { border:0; box-shadow:none; }
 .app-shell .short-progress:focus-visible::-webkit-slider-thumb { box-shadow:0 0 0 3px var(--color-focus); }
 .app-shell .short-progress:focus-visible::-moz-range-thumb { box-shadow:0 0 0 3px var(--color-focus); }
-.media-context-menu { max-height:calc(100dvh - 24px); overflow:auto; overscroll-behavior:contain; }
 
 @media (max-width:900px) and (max-height:500px) {
   .app-shell .short-video { object-fit:contain; }

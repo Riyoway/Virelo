@@ -1,9 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, Heart, Info, Play } from '@phosphor-icons/react';
+import { useContextMenuPlacement } from '../hooks/useContextMenuPlacement';
+import type { ContextMenuPosition } from '../utils/context-menu';
 import type { MediaItem } from '../types';
 
-type MenuPosition = { x: number; y: number };
+type MenuPosition = ContextMenuPosition;
 
 export function MediaContextMenu({
   item,
@@ -29,18 +31,7 @@ export function MediaContextMenu({
   const previousFocusRef = useRef<HTMLElement|null>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
-  const [offset, setOffset] = useState(position);
-
-  useLayoutEffect(() => {
-    const menu = menuRef.current;
-    if (!menu) return;
-    const rect = menu.getBoundingClientRect();
-    const margin = 12;
-    setOffset({
-      x: Math.max(margin, Math.min(position.x, window.innerWidth - rect.width - margin)),
-      y: Math.max(margin, Math.min(position.y, window.innerHeight - rect.height - margin))
-    });
-  }, [position]);
+  const placement = useContextMenuPlacement(menuRef, position, returnFocus);
 
   useEffect(() => {
     previousFocusRef.current = returnFocus ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
@@ -80,10 +71,11 @@ export function MediaContextMenu({
   return createPortal(
     <div
       ref={menuRef}
-      className="media-context-menu"
+      className="media-context-menu context-popover"
+      data-side={placement.side} data-animate={placement.animate}
       role="menu"
       aria-label={`${item.title} actions`}
-      style={{ left: offset.x, top: offset.y }}
+      style={placement.style}
       onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); }}
       onClick={(event) => event.stopPropagation()}
       onPointerDown={(event) => event.stopPropagation()}
@@ -104,6 +96,7 @@ export function MediaContextMenu({
         if (next !== undefined) { event.preventDefault(); items[next]?.focus(); }
       }}
     >
+      <div className="context-popover-content">
       <div className="media-context-menu-title" title={item.title}>
         <span>{item.title}</span>
       </div>
@@ -120,8 +113,9 @@ export function MediaContextMenu({
         {item.progress_position && item.progress_position > 10 && !item.progress_completed ? 'Resume playback' : 'Play now'}
       </MenuItem>
       <MenuItem icon={<Info />} onClick={() => choose(onDetails)}>Open details</MenuItem>
+      </div>
     </div>,
-    document.body
+    document.fullscreenElement || document.body
   );
 }
 

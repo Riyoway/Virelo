@@ -16,14 +16,14 @@
 .player:focus-visible { outline:2px solid var(--color-focus); outline-offset:-2px; }
 .player.controls-visible .player-caption { bottom:var(--player-controls-height,112px); }
 
-.player-action-menu { position:fixed; z-index:180; width:224px; max-width:calc(100vw - 16px); max-height:calc(100dvh - 16px); overflow:auto; overscroll-behavior:contain; padding:4px; border:1px solid rgba(255,255,255,.12); border-radius:8px; background:#171719; box-shadow:0 8px 24px rgba(0,0,0,.45); color:var(--text); }
-.player-action-menu>button { width:100%; min-height:44px; display:flex; align-items:center; gap:10px; border:0; border-radius:4px; padding:8px 10px; background:transparent; color:inherit; text-align:left; font-size:13px; cursor:pointer; }
-.player-action-menu>button:hover,.player-action-menu>button[aria-checked="true"] { background:rgba(255,255,255,.08); }
-.player-action-menu>button:focus-visible { outline:2px solid var(--color-focus); outline-offset:-2px; }
-.player-action-menu>button:disabled { opacity:.4; cursor:not-allowed; }
-.player-action-menu>button>span { flex:1; }
+.player-action-menu { z-index:180; width:224px; }
+.player-action-menu-content>button { width:100%; min-height:44px; display:flex; align-items:center; gap:10px; border:0; border-radius:4px; padding:8px 10px; background:transparent; color:inherit; text-align:left; font-size:13px; cursor:pointer; }
+.player-action-menu-content>button:hover,.player-action-menu-content>button[aria-checked="true"] { background:rgba(255,255,255,.08); }
+.player-action-menu-content>button:focus-visible { outline:2px solid var(--color-focus); outline-offset:-2px; }
+.player-action-menu-content>button:disabled { opacity:.4; cursor:not-allowed; }
+.player-action-menu-content>button>span { flex:1; }
 .player-action-menu svg { flex:none; width:18px; height:18px; }
-.player-action-menu>button[aria-checked="true"] svg:last-child { color:var(--color-brand); }
+.player-action-menu-content>button[aria-checked="true"] svg:last-child { color:var(--color-brand); }
 .playback-track-list,.player-action-menu { scrollbar-width:none; }
 .playback-track-list::-webkit-scrollbar,.player-action-menu::-webkit-scrollbar { display:none; }
 

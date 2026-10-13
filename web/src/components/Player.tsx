@@ -83,7 +83,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
   const [singleRepeat,setSingleRepeat] = useState<RepeatMode>('off');
   const repeat=repeatMode??singleRepeat;
   const changeRepeat=onRepeatChange??setSingleRepeat;
-  const [contextPosition,setContextPosition]=useState<{x:number;y:number}|null>(null);
+  const [contextPosition,setContextPosition]=useState<{x:number;y:number;keyboard?:boolean}|null>(null);
   const [controlsVisible,setControlsVisible] = useState(true);
   useEffect(()=>{
     const player=containerRef.current, controls=player?.querySelector<HTMLElement>('.player-controls');
@@ -628,7 +628,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
   return <div className={`player${queue?.length?' has-queue':''}${controlsVisible?' controls-visible':''}`} ref={containerRef} tabIndex={0} aria-label={item.title+' player'}
     onContextMenu={event=>{event.preventDefault();event.stopPropagation();revealControls();setContextPosition({x:event.clientX,y:event.clientY});}}
     onDoubleClick={()=>void fullscreen()} onPointerMove={(event)=>{if(event.pointerType==='mouse'){revealControls();scheduleControlsHide();}}} onPointerDown={revealControls} onPointerUp={scheduleControlsHide} onPointerCancel={scheduleControlsHide} onPointerLeave={scheduleControlsHide} onFocusCapture={revealControls} onBlurCapture={scheduleControlsHide}
-    onKeyDown={event=>{revealControls();scheduleControlsHide();if(event.target===event.currentTarget&&(event.key==='ContextMenu'||(event.shiftKey&&event.key==='F10'))){event.preventDefault();const bounds=event.currentTarget.getBoundingClientRect();setContextPosition({x:bounds.left+24,y:bounds.top+24});}}}>
+    onKeyDown={event=>{revealControls();scheduleControlsHide();if(event.target===event.currentTarget&&(event.key==='ContextMenu'||(event.shiftKey&&event.key==='F10'))){event.preventDefault();const bounds=event.currentTarget.getBoundingClientRect();setContextPosition({x:bounds.left+24,y:bounds.top+24,keyboard:true});}}}>
     <video
       ref={videoRef}
       src={`/api/media/${item.id}/stream`}

@@ -30,7 +30,7 @@ try {
   });
   browser = await chromium.launch({ headless: true, executablePath: process.env.VIRELO_TEST_CHROMIUM,
     args: ['--autoplay-policy=no-user-gesture-required'] });
-  const context = await browser.newContext({ serviceWorkers: 'block' });
+  const context = await browser.newContext({ serviceWorkers: 'block', hasTouch: true });
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -96,12 +96,54 @@ try {
   }, { base, mode });
   const prefix = mode === 'web' ? '/app' : '';
   const navigate = async path => page.evaluate(path => window.__router.navigate({ to: path }), prefix + path);
+  await page.evaluate(() => {
+    const nativeAnimate = HTMLElement.prototype.animate;
+    window.__heartEffects = [];
+    HTMLElement.prototype.animate = function (frames, options) {
+      const animation = nativeAnimate.call(this, frames, options);
+      if (this.classList.contains('favorite-icon')) {
+        window.__heartEffects.push({ animation, target: this, frames: animation.effect.getKeyframes(),
+          timing: animation.effect.getTiming(), easing: options.easing });
+      }
+      return animation;
+    };
+  });
   const first = page.locator('.short-slot').first();
-  await first.getByRole('button', { name: 'Add to favorites', exact: true }).click();
+  await first.getByRole('button', { name: 'Add to favorites', exact: true }).tap();
   await page.waitForFunction(() => window.__items[0].liked === 1 && window.__client.getQueryData(['home']).favorites.length === 1);
   assert.equal(await first.getByRole('button', { name: 'Remove from favorites' }).getAttribute('aria-pressed'), 'true');
+  const pulse = await page.evaluate(() => {
+    const effect = window.__heartEffects[0];
+    return { duration: effect.timing.duration, easing: effect.easing, tag: effect.target.tagName,
+      pop: effect.frames.some(frame => String(frame.transform).includes('1.18')),
+      width: parseFloat(getComputedStyle(effect.target.querySelector('svg')).width),
+      token: getComputedStyle(effect.target).getPropertyValue('--ease-out').trim() };
+  });
+  assert.equal(pulse.duration, 160);
+  assert.equal(pulse.easing, pulse.token);
+  assert.equal(pulse.tag, 'SPAN');
+  assert.equal(pulse.pop, true);
+  assert.equal(pulse.width, 48);
+  await page.evaluate(async () => {
+    const animation = window.__heartEffects[0].animation;
+    animation.pause(); await animation.ready; animation.currentTime = 80;
+    window.__retargetTransform = getComputedStyle(window.__heartEffects[0].target).transform;
+  });
+  await first.getByRole('button', { name: 'Remove from favorites' }).click();
+  await page.waitForFunction(() => window.__items[0].liked === 0);
+  assert.equal(await page.evaluate(() => window.__heartEffects[0].animation.playState), 'idle');
+  assert.deepEqual(await page.evaluate(() => [window.__heartEffects.at(-1).frames[0].transform]), await page.evaluate(() => [window.__retargetTransform]), 'interrupted feedback resumes at its current transform');
+  assert.equal(await page.evaluate(() => window.__heartEffects.at(-1).frames.some(frame => String(frame.transform).includes('0.9'))), true);
+  await first.getByRole('button', { name: 'Add to favorites' }).click();
+  await page.waitForFunction(() => window.__items[0].liked === 1);
+  await page.evaluate(() => {
+    window.__unmountAnimation = window.__heartEffects.at(-1).animation;
+    window.__unmountAnimation.currentTime = 80; window.__unmountAnimation.pause();
+  });
+  console.log(mode + ': heart pulse uses the existing easing, retargets cleanly and preserves Shorts sizing');
   await page.locator('.shorts-scroller').evaluate(element => { element.scrollTop = element.clientHeight * 4; });
   await first.locator('.short-slot-placeholder').waitFor({ state: 'attached' });
+  assert.equal(await page.evaluate(() => window.__unmountAnimation.playState), 'idle');
   await page.locator('.shorts-scroller').evaluate(element => { element.scrollTop = 0; });
   await first.getByRole('button', { name: 'Remove from favorites' }).waitFor();
   console.log(mode + ': Shorts remount and Home save state stay synchronized');
@@ -133,8 +175,36 @@ try {
   await page.locator('.detail-actions .favorite-button').evaluate(button => { button.click(); button.click(); });
   await page.waitForFunction(() => window.__items[6].liked === 0);
   assert.equal(await page.evaluate(() => window.__writes), before + 1);
+  const keyboardEffects = await page.evaluate(() => window.__heartEffects.length);
+  await page.locator('.detail-actions').getByRole('button', { name: 'Add to favorites' }).focus();
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => window.__items[6].liked === 1);
+  assert.equal(await page.evaluate(() => window.__heartEffects.length), keyboardEffects);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.locator('.detail-actions').getByRole('button', { name: 'Remove from favorites' }).click();
+  await page.waitForFunction(() => window.__items[6].liked === 0);
+  assert.equal(await page.evaluate(() => {
+    const frames = window.__heartEffects.at(-1).frames;
+    return frames.some(frame => Number(frame.opacity) === 0.6) && frames.every(frame => !frame.transform);
+  }), true);
+  await page.locator('.detail-actions').getByRole('button', { name: 'Add to favorites' }).focus();
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => window.__items[6].liked === 1);
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  const effectsBeforeFallback = await page.evaluate(() => {
+    window.__restoreAnimate = HTMLElement.prototype.animate;
+    HTMLElement.prototype.animate = undefined;
+    return window.__heartEffects.length;
+  });
+  await page.locator('.detail-actions').getByRole('button', { name: 'Remove from favorites' }).click();
+  await page.waitForFunction(() => window.__items[6].liked === 0);
+  assert.equal(await page.evaluate(() => window.__heartEffects.length), effectsBeforeFallback);
+  await page.evaluate(() => { HTMLElement.prototype.animate = () => { throw new Error('Test animation failure'); }; });
   await page.locator('.detail-actions').getByRole('button', { name: 'Add to favorites' }).click();
   await page.waitForFunction(() => window.__items[6].liked === 1);
+  assert.equal(await page.evaluate(() => window.__heartEffects.length), effectsBeforeFallback);
+  await page.evaluate(() => { HTMLElement.prototype.animate = window.__restoreAnimate; });
+  console.log(mode + ': reduced motion fades, keyboard is instant and missing animation support cannot block saving');
   console.log(mode + ': landscape save, failure rollback and repeated-click guard pass');
 
   await navigate('/watch/7');
@@ -146,7 +216,9 @@ try {
   await page.waitForFunction(() => window.__items[6].liked === 0);
   assert.equal(await video.evaluate(element => element.paused), false);
   assert.equal(await page.evaluate(() => window.__pauses), 0);
-  console.log(mode + ': saving from the player does not interrupt playback');
+  assert.equal(await page.locator('.player-tools .favorite-icon svg').evaluate(icon => icon.getBoundingClientRect().width), 22);
+  assert.equal(await page.locator('.player-tools .favorite-icon').evaluate(icon => getComputedStyle(icon).transform), 'none');
+  console.log(mode + ': saving from the player does not interrupt playback or change heart sizing');
 
   await navigate('/favorites');
   await page.getByRole('heading', { name: 'Favorites', exact: true }).waitFor();

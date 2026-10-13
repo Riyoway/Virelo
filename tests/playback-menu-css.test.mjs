@@ -12,6 +12,9 @@ test('production player menus retain standard backdrop blur, not only the WebKit
   const menuRules = [...css.matchAll(/\.playback-settings-menu\{([^}]+)\}/g)].map(match => match[1]);
   assert.ok(menuRules.some(rule => /(?:^|;)backdrop-filter:blur\(18px\)(?:;|$)/.test(rule)),
     'CSS optimization must not strip the standard backdrop-filter declaration');
+  const contextRules = [...css.matchAll(/\.context-popover\{([^}]+)\}/g)].map(match => match[1]);
+  assert.ok(contextRules.some(rule => /(?:^|;)backdrop-filter:blur\(18px\)(?:;|$)/.test(rule)), 'context menus retain standard blur');
+  assert.ok(contextRules.some(rule => /background:#18181c(?:;|$)/.test(rule)), 'context menus have an opaque fallback');
   assert.ok(menuRules.some(rule => /background:#18181c(?:;|$)/.test(rule)),
     'browsers without blur must have an opaque, readable fallback');
 });
