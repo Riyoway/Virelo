@@ -99,15 +99,25 @@ try {
   await page.evaluate(() => {
     const nativeAnimate = HTMLElement.prototype.animate;
     window.__heartEffects = [];
+    window.__sparkEffects = [];
     HTMLElement.prototype.animate = function (frames, options) {
       const animation = nativeAnimate.call(this, frames, options);
-      if (this.classList.contains('favorite-icon')) {
-        window.__heartEffects.push({ animation, target: this, frames: animation.effect.getKeyframes(),
+      const effects = this.classList.contains('favorite-icon') ? window.__heartEffects
+        : this.classList.contains('favorite-spark') ? window.__sparkEffects : null;
+      if (effects) {
+        effects.push({ animation, target: this, frames: animation.effect.getKeyframes(),
           timing: animation.effect.getTiming(), easing: options.easing });
       }
       return animation;
     };
   });
+  const holdSparks = name => page.evaluate(async name => {
+    const effects = window.__sparkEffects.slice(-8);
+    window[name] = effects;
+    effects.forEach(({ animation }) => animation.pause());
+    await Promise.all(effects.map(({ animation }) => animation.ready));
+    effects.forEach(({ animation }) => { animation.currentTime = 30; });
+  }, name);
   const first = page.locator('.short-slot').first();
   await first.getByRole('button', { name: 'Add to favorites', exact: true }).tap();
   await page.waitForFunction(() => window.__items[0].liked === 1 && window.__client.getQueryData(['home']).favorites.length === 1);
@@ -124,6 +134,16 @@ try {
   assert.equal(pulse.tag, 'SPAN');
   assert.equal(pulse.pop, true);
   assert.equal(pulse.width, 48);
+  assert.equal(await page.evaluate(() => window.__sparkEffects.length), 8, 'touch like emits eight rays');
+  assert.equal(await page.evaluate(() => window.__sparkEffects.every(effect =>
+    effect.timing.duration === 160 && effect.easing === getComputedStyle(effect.target).getPropertyValue('--ease-out').trim()
+    && effect.frames[0].opacity === '1' && effect.frames.at(-1).opacity === '0'
+    && effect.frames.every(frame => Object.keys(frame).every(key => ['transform', 'opacity', 'offset', 'computedOffset', 'easing', 'composite'].includes(key)))
+    && getComputedStyle(effect.target).pointerEvents === 'none'
+    && effect.target.closest('[aria-hidden="true"]'))), true, 'sparks are decorative, compositor-only and use the shared timing');
+  assert.equal(await page.evaluate(() => new Set(window.__sparkEffects.map(effect => effect.frames[0].transform)).size), 8);
+  await holdSparks('__touchSparks');
+  await page.screenshot({ path: join(repo, 'node_modules/.cache/favorite-sparks-shorts-' + mode + '.png') });
   await page.evaluate(async () => {
     const animation = window.__heartEffects[0].animation;
     animation.pause(); await animation.ready; animation.currentTime = 80;
@@ -132,6 +152,8 @@ try {
   await first.getByRole('button', { name: 'Remove from favorites' }).click();
   await page.waitForFunction(() => window.__items[0].liked === 0);
   assert.equal(await page.evaluate(() => window.__heartEffects[0].animation.playState), 'idle');
+  assert.equal(await page.evaluate(() => window.__sparkEffects.length), 8, 'unlike does not emit another burst');
+  assert.equal(await page.evaluate(() => window.__sparkEffects.every(effect => effect.animation.playState === 'idle')), true, 'unlike cancels the existing burst');
   assert.deepEqual(await page.evaluate(() => [window.__heartEffects.at(-1).frames[0].transform]), await page.evaluate(() => [window.__retargetTransform]), 'interrupted feedback resumes at its current transform');
   assert.equal(await page.evaluate(() => window.__heartEffects.at(-1).frames.some(frame => String(frame.transform).includes('0.9'))), true);
   await first.getByRole('button', { name: 'Add to favorites' }).click();
@@ -139,14 +161,36 @@ try {
   await page.evaluate(() => {
     window.__unmountAnimation = window.__heartEffects.at(-1).animation;
     window.__unmountAnimation.currentTime = 80; window.__unmountAnimation.pause();
+    window.__unmountSparks = window.__sparkEffects.slice(-8);
+    window.__unmountSparks.forEach(({ animation }) => { animation.currentTime = 30; animation.pause(); });
   });
   console.log(mode + ': heart pulse uses the existing easing, retargets cleanly and preserves Shorts sizing');
   await page.locator('.shorts-scroller').evaluate(element => { element.scrollTop = element.clientHeight * 4; });
   await first.locator('.short-slot-placeholder').waitFor({ state: 'attached' });
   assert.equal(await page.evaluate(() => window.__unmountAnimation.playState), 'idle');
+  assert.equal(await page.evaluate(() => window.__unmountSparks.every(effect => effect.animation.playState === 'idle')), true);
+  assert.equal(await page.evaluate(() => Array.from(document.querySelectorAll('.favorite-spark')).every(spark => getComputedStyle(spark).opacity === '0')), true);
   await page.locator('.shorts-scroller').evaluate(element => { element.scrollTop = 0; });
   await first.getByRole('button', { name: 'Remove from favorites' }).waitFor();
   console.log(mode + ': Shorts remount and Home save state stay synchronized');
+  const originalViewport = page.viewportSize();
+  for (const viewport of [{ width: 320, height: 812 }, { width: 375, height: 812 }, { width: 812, height: 375 }]) {
+    await page.setViewportSize(viewport);
+    await first.getByRole('button', { name: 'Remove from favorites' }).click();
+    await page.waitForFunction(() => window.__items[0].liked === 0);
+    await first.getByRole('button', { name: 'Add to favorites' }).tap();
+    await page.waitForFunction(() => window.__items[0].liked === 1);
+    await holdSparks('__mobileSparks');
+    assert.equal(await first.locator('.favorite-icon svg').isVisible(), true, 'heart remains visible in landscape');
+    assert.equal(await page.evaluate(() => window.__mobileSparks.every(({ target }) => {
+      const rect = target.getBoundingClientRect();
+      return Number(getComputedStyle(target).opacity) > 0.8 && rect.left >= 0 && rect.right <= innerWidth
+        && rect.top >= 0 && rect.bottom <= innerHeight;
+    })), true, 'mobile burst fits on screen');
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    if (viewport.width === 375) await page.screenshot({ path: join(repo, 'node_modules/.cache/favorite-sparks-mobile-' + mode + '.png') });
+  }
+  await page.setViewportSize(originalViewport);
 
   await navigate('/favorites');
   await page.getByRole('heading', { name: 'Favorites', exact: true }).waitFor();
@@ -176,10 +220,12 @@ try {
   await page.waitForFunction(() => window.__items[6].liked === 0);
   assert.equal(await page.evaluate(() => window.__writes), before + 1);
   const keyboardEffects = await page.evaluate(() => window.__heartEffects.length);
+  const keyboardSparks = await page.evaluate(() => window.__sparkEffects.length);
   await page.locator('.detail-actions').getByRole('button', { name: 'Add to favorites' }).focus();
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => window.__items[6].liked === 1);
   assert.equal(await page.evaluate(() => window.__heartEffects.length), keyboardEffects);
+  assert.equal(await page.evaluate(() => window.__sparkEffects.length), keyboardSparks);
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.locator('.detail-actions').getByRole('button', { name: 'Remove from favorites' }).click();
   await page.waitForFunction(() => window.__items[6].liked === 0);
@@ -187,6 +233,11 @@ try {
     const frames = window.__heartEffects.at(-1).frames;
     return frames.some(frame => Number(frame.opacity) === 0.6) && frames.every(frame => !frame.transform);
   }), true);
+  await page.locator('.detail-actions').getByRole('button', { name: 'Add to favorites' }).click();
+  await page.waitForFunction(() => window.__items[6].liked === 1);
+  assert.equal(await page.evaluate(() => window.__sparkEffects.length), keyboardSparks, 'reduced motion never emits moving sparks');
+  await page.locator('.detail-actions').getByRole('button', { name: 'Remove from favorites' }).click();
+  await page.waitForFunction(() => window.__items[6].liked === 0);
   await page.locator('.detail-actions').getByRole('button', { name: 'Add to favorites' }).focus();
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => window.__items[6].liked === 1);
@@ -204,6 +255,30 @@ try {
   await page.waitForFunction(() => window.__items[6].liked === 1);
   assert.equal(await page.evaluate(() => window.__heartEffects.length), effectsBeforeFallback);
   await page.evaluate(() => { HTMLElement.prototype.animate = window.__restoreAnimate; });
+  await page.locator('.detail-actions').getByRole('button', { name: 'Remove from favorites' }).click();
+  await page.waitForFunction(() => window.__items[6].liked === 0);
+  await page.evaluate(() => { window.__failLike = true; window.__likeDelay = 400; });
+  await page.locator('.detail-actions').getByRole('button', { name: 'Add to favorites' }).click();
+  await holdSparks('__failedSparks');
+  await page.getByRole('alert').filter({ hasText: 'Could not update favorites' }).waitFor();
+  assert.equal(await page.evaluate(() => window.__failedSparks.every(effect => effect.animation.playState === 'idle')), true, 'save failure cancels optimistic feedback');
+  assert.equal(await page.locator('.detail-actions .favorite-button').getAttribute('aria-pressed'), 'false');
+  await page.evaluate(() => { window.__failLike = false; window.__likeDelay = 0; });
+  // A partially-created burst must be cleaned up if a later ray fails to animate.
+  await page.evaluate(() => {
+    const animate = HTMLElement.prototype.animate;
+    let rays = 0;
+    HTMLElement.prototype.animate = function (...args) {
+      if (this.classList.contains('favorite-spark') && ++rays === 3) throw new Error('Test partial burst failure');
+      return animate.apply(this, args);
+    };
+  });
+  const partialStart = await page.evaluate(() => window.__sparkEffects.length);
+  await page.locator('.detail-actions').getByRole('button', { name: 'Add to favorites' }).click();
+  await page.waitForFunction(() => window.__items[6].liked === 1);
+  assert.equal(await page.evaluate(start => window.__sparkEffects.slice(start).every(effect => effect.animation.playState === 'idle'), partialStart), true);
+  assert.equal(await page.evaluate(() => window.__sparkEffects.length), partialStart + 2);
+  await page.evaluate(() => { HTMLElement.prototype.animate = window.__restoreAnimate; });
   console.log(mode + ': reduced motion fades, keyboard is instant and missing animation support cannot block saving');
   console.log(mode + ': landscape save, failure rollback and repeated-click guard pass');
 
@@ -216,6 +291,7 @@ try {
   await page.waitForFunction(() => window.__items[6].liked === 0);
   assert.equal(await video.evaluate(element => element.paused), false);
   assert.equal(await page.evaluate(() => window.__pauses), 0);
+  await page.waitForFunction(() => getComputedStyle(document.querySelector('.player-tools .favorite-icon')).transform === 'none');
   assert.equal(await page.locator('.player-tools .favorite-icon svg').evaluate(icon => icon.getBoundingClientRect().width), 22);
   assert.equal(await page.locator('.player-tools .favorite-icon').evaluate(icon => getComputedStyle(icon).transform), 'none');
   console.log(mode + ': saving from the player does not interrupt playback or change heart sizing');
@@ -231,6 +307,24 @@ try {
       document.head.append(style);
     }, css);
   }
+  await page.evaluate(() => { window.__likeDelay = 600; });
+  const playerHeart = page.locator('.player-tools .favorite-button');
+  const heartBox = await playerHeart.boundingBox();
+  await playerHeart.click();
+  await holdSparks('__playerSparks');
+  assert.equal(await playerHeart.getAttribute('aria-busy'), 'true');
+  assert.equal(await playerHeart.evaluate(button => getComputedStyle(button).opacity), '1', 'pending save does not dim the spark');
+  assert.deepEqual(await playerHeart.boundingBox(), heartBox, 'burst cannot move or resize the button');
+  assert.equal(await page.evaluate(() => window.__playerSparks.every(({ target }) => Number(getComputedStyle(target).opacity) > 0.8)), true);
+  assert.equal(await video.evaluate(element => element.paused), false);
+  assert.equal(await page.evaluate(() => window.__pauses), 0);
+  await page.screenshot({ path: join(repo, 'node_modules/.cache/favorite-sparks-player-' + mode + '.png') });
+  await page.waitForFunction(() => window.__items[6].liked === 1);
+  await playerHeart.click();
+  await page.waitForFunction(() => window.__items[6].liked === 0);
+  assert.equal(await page.evaluate(() => window.__playerSparks.every(effect => effect.animation.playState === 'idle')), true);
+  await page.evaluate(() => { window.__likeDelay = 0; });
+  console.log(mode + ': touch/pointer spark burst, cancellation, save fallback, stable layout and uninterrupted playback pass');
   // Check the real Player: presentation changes must not reload or pause its source.
   const displayButton = page.getByRole('button', { name: 'Video settings', exact: true });
   const displayMenu = page.getByRole('dialog', { name: 'Video settings', exact: true });
