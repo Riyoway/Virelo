@@ -215,6 +215,7 @@ try {
      await page.locator('#context-surface').click({button:'right',position:point});
      await contextMenu().evaluate(e=>Promise.all(e.getAnimations().map(animation=>animation.finished)));
      const rect=await contextMenu().boundingBox();
+     if(viewport.width>=844&&point.x===48)check(Math.abs(rect.x-point.x-14)<1,mode+' '+kind+' opens immediately right of the pointer');
      check(kind!=='player'||Math.abs(rect.width-224)<1,mode+' player context uses its compact vertical layout');
      check(kind!=='player'||await contextMenu().getByRole('menuitem').evaluateAll(buttons=>buttons.every(button=>getComputedStyle(button).display==='flex')),
        mode+' player context items retain their row styling');
@@ -223,16 +224,16 @@ try {
      check(await contextMenu().evaluate(e=>{
       const style=getComputedStyle(e),tail=getComputedStyle(e,'::after');
       return style.backdropFilter==='blur(18px)'&&style.borderWidth==='0px'&&style.borderRadius==='16px'
-        &&style.overflow==='visible'&&tail.content!=='none'&&tail.height==='10px';
+        &&style.overflow==='visible'&&tail.content!=='none'&&tail.width==='10px'&&tail.height==='22px';
      }),mode+' '+kind+' context bubble has readable blur and an unclipped tail');
      check(await contextMenu().evaluate((e,point)=>{
       const rect=e.getBoundingClientRect(),tail=getComputedStyle(e,'::after');
-      const tipX=rect.left+parseFloat(tail.left)+parseFloat(tail.width)/2;
-      const target=Math.max(rect.left+24,Math.min(point.x,rect.right-24));
-      const tipY=rect.top+parseFloat(tail.top)+(e.dataset.side==='above'?10:0);
-      return Math.abs(tipX-target)<1&&tipY>=0&&tipY<=innerHeight;
+      const tipY=rect.top+parseFloat(tail.top)+parseFloat(tail.height)/2;
+      const target=Math.max(rect.top+24,Math.min(point.y,rect.bottom-24));
+      const tipX=e.dataset.side==='right'?rect.left-10:rect.right+10;
+      return Math.abs(tipY-target)<1&&tipX>=0&&tipX<=innerWidth;
      },point),mode+' '+kind+' context tail follows its click with safe edge clamping');
-     if(viewport.height===240&&point.y===viewport.height/2){
+     if(kind==='player'&&viewport.height===240&&point.y===viewport.height/2){
       const content=contextMenu().locator('.context-popover-content');
       check(await content.evaluate(e=>e.scrollHeight>e.clientHeight),mode+' '+kind+' tall context list scrolls on short screens');
       await content.evaluate(e=>{e.scrollTop=e.scrollHeight;});
@@ -245,9 +246,13 @@ try {
     }
    }
    await page.setViewportSize({width:1440,height:900});
+   await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
    await page.evaluate(kind=>window.__openContext(kind,500,300,true),kind);
+   await page.waitForFunction(()=>document.querySelector('.context-popover')?.dataset.animate==='false');
    check(await contextMenu().evaluate(e=>e.dataset.animate==='false'&&getComputedStyle(e).transitionDuration==='0s'),
      mode+' '+kind+' keyboard context opening is instant');
+   await page.evaluate(()=>document.dispatchEvent(new Event('scroll')));
+   check(await contextMenu().count()===1,mode+' '+kind+' ignores queued scrolling without movement');
    await page.keyboard.press('End');await page.keyboard.press('Enter');
    check(await contextMenu().count()===0,mode+' '+kind+' keyboard action remains available');
    await page.emulateMedia({reducedMotion:'reduce'});
@@ -263,6 +268,17 @@ try {
    check(await page.evaluate(()=>window.__contextCount)===opened&&await contextMenu().count()===1,
      mode+' '+kind+' menu does not open another context menu on itself');
    await page.keyboard.press('Escape');await page.evaluate(()=>document.exitFullscreen());
+   await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+   await page.evaluate(kind=>{
+    document.body.style.paddingBottom='2000px';
+    window.__openContext(kind,500,300,true);
+   },kind);
+   await contextMenu().waitFor();
+   await page.evaluate(()=>window.scrollTo({top:100,behavior:'instant'}));
+   await contextMenu().waitFor({state:'hidden'});
+   check(await contextMenu().count()===0,mode+' '+kind+' dismisses on genuine outside scrolling');
+   await page.evaluate(()=>{document.body.style.removeProperty('padding-bottom');window.scrollTo({top:0,behavior:'instant'});});
+   await page.waitForFunction(()=>scrollY===0);
   }
 
   check(errors.length===0,mode+' no runtime errors '+errors.join('|'));

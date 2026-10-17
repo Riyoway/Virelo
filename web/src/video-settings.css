@@ -27,3 +27,5 @@
 .video-settings-reset { display:flex; align-items:center; justify-content:center; gap:8px; width:100%; min-height:36px; border-radius:6px; font-size:12px; }
 .video-settings-reset:disabled { opacity:.4; cursor:default; }
 .video-settings-content>.video-settings-hint:last-child { margin-bottom:0; }
+.video-settings-submenu { width:100%; }
+.video-settings-menu[data-side="left"],.video-settings-menu[data-side="right"] { z-index:200; }

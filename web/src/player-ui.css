@@ -17,11 +17,11 @@
 .player.controls-visible .player-caption { bottom:var(--player-controls-height,112px); }
 
 .player-action-menu { z-index:180; width:224px; }
-.player-action-menu-content>button { width:100%; min-height:44px; display:flex; align-items:center; gap:10px; border:0; border-radius:4px; padding:8px 10px; background:transparent; color:inherit; text-align:left; font-size:13px; cursor:pointer; }
-.player-action-menu-content>button:hover,.player-action-menu-content>button[aria-checked="true"] { background:rgba(255,255,255,.08); }
-.player-action-menu-content>button:focus-visible { outline:2px solid var(--color-focus); outline-offset:-2px; }
+.player-action-menu-content>button,.player-action-menu-content>.video-settings>button { width:100%; min-height:44px; display:flex; align-items:center; gap:10px; border:0; border-radius:4px; padding:8px 10px; background:transparent; color:inherit; text-align:left; font-size:13px; cursor:pointer; }
+.player-action-menu-content :is(button:hover,button[aria-checked="true"],button[aria-expanded="true"]) { background:rgba(255,255,255,.08); }
+.player-action-menu-content button:focus-visible { outline:2px solid var(--color-focus); outline-offset:-2px; }
 .player-action-menu-content>button:disabled { opacity:.4; cursor:not-allowed; }
-.player-action-menu-content>button>span { flex:1; }
+.player-action-menu-content button>span { flex:1; }
 .player-action-menu svg { flex:none; width:18px; height:18px; }
 .player-action-menu-content>button[aria-checked="true"] svg:last-child { color:var(--color-brand); }
 .playback-track-list,.player-action-menu { scrollbar-width:none; }

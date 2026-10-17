@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Open context menus beside the pointer, with edge-aware left/right placement and side-facing bubble tails. Open Video settings beside its context-menu row as a nested panel, preserving the parent menu and keyboard/focus behavior.
+
 - Add a dedicated Video settings bubble with aspect-preserving fit/fill, 90° rotation and brightness, contrast and saturation sliders. Apply changes without reloading playback or modifying files, reset them for each video, and keep subtitles and controls unaffected. Native Picture in Picture retains the original view.
 
 - Use frosted, rounded speech-bubble menus for playback quality, audio and subtitles, anchored to their toolbar buttons with a short entrance transition. Preserve standard background blur in production CSS, improve text contrast and provide an opaque fallback. Keep keyboard opening instant and respect reduced motion.

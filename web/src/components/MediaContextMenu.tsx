@@ -46,8 +46,10 @@ export function MediaContextMenu({
         closeRef.current();
       }
     };
+    const scrollAtOpen = { x: window.scrollX, y: window.scrollY };
     const onViewportChange = (event: Event) => {
       if (event.target instanceof Node && menuRef.current?.contains(event.target)) return;
+      if (event.type === 'scroll' && event.target === document && window.scrollX === scrollAtOpen.x && window.scrollY === scrollAtOpen.y) return;
       closeRef.current();
     };
     document.addEventListener('pointerdown', onPointerDown);

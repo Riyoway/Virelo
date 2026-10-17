@@ -1,10 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, Fragment, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Check } from '@phosphor-icons/react';
 import { useContextMenuPlacement } from '../hooks/useContextMenuPlacement';
 import type { ContextMenuPosition } from '../utils/context-menu';
 
-export interface PlayerAction { label:string; icon?:ReactNode; checked?:boolean; disabled?:boolean; action:()=>void; }
+export type PlayerAction = { label:string; content:ReactNode } | { label:string; icon?:ReactNode; checked?:boolean; disabled?:boolean; action:()=>void };
 
 export function PlayerActionMenu({position,label,actions,returnFocus,onClose}:{
   position:ContextMenuPosition; label:string; actions:PlayerAction[]; returnFocus:HTMLElement|null; onClose:()=>void;
@@ -17,9 +17,18 @@ export function PlayerActionMenu({position,label,actions,returnFocus,onClose}:{
     menu.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus({preventScroll:true});
   },[position]);
   useEffect(()=>{
-    const outside=(event:PointerEvent)=>{if(!ref.current?.contains(event.target as Node))close.current();};
-    const escape=(event:KeyboardEvent)=>{if(event.key==='Escape'){event.preventDefault();returnFocus?.focus({preventScroll:true});close.current();}};
-    const viewport=(event:Event)=>{if(!(event.target instanceof Node && ref.current?.contains(event.target)))close.current();};
+    const owns=(target:Node)=>Boolean(ref.current?.contains(target)||Array.from(ref.current?.querySelectorAll('[aria-controls]')??[]).some(button=>{
+      const id=button.getAttribute('aria-controls');return id&&document.getElementById(id)?.contains(target);
+    }));
+    const outside=(event:PointerEvent)=>{if(!owns(event.target as Node))close.current();};
+    const escape=(event:KeyboardEvent)=>{if(event.key==='Escape'&&!ref.current?.querySelector('[aria-haspopup="dialog"][aria-expanded="true"]')){event.preventDefault();returnFocus?.focus({preventScroll:true});close.current();}};
+    const scrollAtOpen={x:window.scrollX,y:window.scrollY};
+    const viewport=(event:Event)=>{
+      if(event.target instanceof Node&&owns(event.target))return;
+      // A queued layout scroll with no position change must not dismiss a newly opened menu.
+      if(event.type==='scroll'&&event.target===document&&window.scrollX===scrollAtOpen.x&&window.scrollY===scrollAtOpen.y)return;
+      close.current();
+    };
     document.addEventListener('pointerdown',outside);
     document.addEventListener('keydown',escape);
     window.addEventListener('resize',viewport);window.addEventListener('scroll',viewport,true);
@@ -39,7 +48,7 @@ export function PlayerActionMenu({position,label,actions,returnFocus,onClose}:{
       if(next!==null){event.preventDefault();buttons[next].focus();}
     }}>
     <div className="context-popover-content player-action-menu-content">
-    {actions.map(option=><button key={option.label} type="button" role={option.checked===undefined?'menuitem':'menuitemradio'} aria-checked={option.checked} disabled={option.disabled}
+    {actions.map(option=>'content' in option?<Fragment key={option.label}>{option.content}</Fragment>:<button key={option.label} type="button" role={option.checked===undefined?'menuitem':'menuitemradio'} aria-checked={option.checked} disabled={option.disabled}
       onClick={()=>{dismiss();option.action();}}>{option.icon}<span>{option.label}</span>{option.checked&&<Check weight="bold"/>}</button>)}
     </div>
   </div>,document.fullscreenElement||document.body);

@@ -29,6 +29,6 @@ export function useContextMenuPlacement(ref: RefObject<HTMLDivElement | null>, p
   return {
     side: placement.side, animate: !keyboard,
     style: { left: placement.left, top: placement.top, maxHeight: placement.maxHeight,
-      '--popover-anchor-x': placement.anchor + 'px' } as CSSProperties
+      '--popover-anchor-y': placement.anchor + 'px' } as CSSProperties
   };
 }

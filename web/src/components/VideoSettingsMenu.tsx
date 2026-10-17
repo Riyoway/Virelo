@@ -1,15 +1,17 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowsIn, ArrowsOut, ArrowCounterClockwise, ArrowClockwise, SlidersHorizontal, X } from '@phosphor-icons/react';
+import { ArrowsIn, ArrowsOut, ArrowCounterClockwise, ArrowClockwise, SlidersHorizontal, CaretRight, X } from '@phosphor-icons/react';
+import { sidePopoverPlacement } from '../utils/context-menu';
 import { DEFAULT_VIDEO_PRESENTATION, type VideoPresentation } from '../utils/video-presentation';
 
 interface Props {
+  contextMenu?: boolean;
   settings: Readonly<VideoPresentation>;
   onChange: (patch: Partial<VideoPresentation>) => void;
   onReset: () => void;
 }
 
-export function VideoSettingsMenu({ settings, onChange, onReset }: Props) {
+export function VideoSettingsMenu({ settings, onChange, onReset, contextMenu = false }: Props) {
   const [open, setOpen] = useState(false);
   const [animate, setAnimate] = useState(false);
   const [placement, setPlacement] = useState({ left: 8, top: 8, width: 300, maxHeight: 480, anchor: 150, side: 'above' });
@@ -49,11 +51,16 @@ export function VideoSettingsMenu({ settings, onChange, onReset }: Props) {
       const button = buttonRef.current?.getBoundingClientRect(), menu = menuRef.current;
       if (!button || !menu) return;
       if (button.bottom < 0 || button.top > window.innerHeight) { setOpen(false); return; }
-      const width = Math.min(300, window.innerWidth - 16);
+      const width = Math.min(300, window.innerWidth - (contextMenu ? 32 : 16));
       const above = Math.max(0, Math.min(window.innerHeight - 16, button.top - 22));
       const below = Math.max(0, Math.min(window.innerHeight - 16, window.innerHeight - button.bottom - 22));
       const desired = Math.min(480, (menu.querySelector<HTMLElement>('.video-settings-content')?.scrollHeight || 0)
         + (menu.querySelector<HTMLElement>('.video-settings-heading')?.offsetHeight || 36) + 16);
+      if (contextMenu) {
+        const next = sidePopoverPlacement(button, { width, height: desired }, { width: window.innerWidth, height: window.innerHeight });
+        setPlacement(previous => Object.keys(next).every(key => next[key as keyof typeof next] === previous[key as keyof typeof previous]) ? previous : next);
+        return;
+      }
       const placeAbove = above >= desired || above >= below;
       const maxHeight = Math.min(480, placeAbove ? above : below);
       const left = Math.max(8, Math.min(button.left + button.width / 2 + 28 - width, window.innerWidth - width - 8));
@@ -76,27 +83,27 @@ export function VideoSettingsMenu({ settings, onChange, onReset }: Props) {
     window.addEventListener('resize', position);
     window.addEventListener('scroll', position, true);
     return () => { observer.disconnect(); window.removeEventListener('resize', position); window.removeEventListener('scroll', position, true); };
-  }, [open]);
+  }, [open, contextMenu]);
 
-  return <div className="playback-settings video-settings" ref={rootRef}
+  return <div className={contextMenu ? "video-settings video-settings-submenu" : "playback-settings video-settings"} ref={rootRef}
     onDoubleClick={event => event.stopPropagation()}
     onKeyDown={event => { if (event.key === 'Escape' && open) { event.preventDefault(); event.stopPropagation(); close(true); } }}>
-    <button ref={buttonRef} type="button" data-setting="video" aria-label="Video settings" title="Video settings"
+    <button ref={buttonRef} type="button" role={contextMenu ? "menuitem" : undefined} data-setting="video" aria-label="Video settings" title="Video settings"
       className={open || changed ? 'active' : ''} aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined}
       onClick={event => { setAnimate(event.detail > 0); setOpen(value => !value); }}
-      onKeyDown={event => { if (event.key === 'ArrowDown') { event.preventDefault(); event.stopPropagation(); setAnimate(false); setOpen(true); } }}>
-      <SlidersHorizontal />
+      onKeyDown={event => { if (event.key === (contextMenu ? 'ArrowRight' : 'ArrowDown')) { event.preventDefault(); event.stopPropagation(); setAnimate(false); setOpen(true); } }}>
+      <SlidersHorizontal />{contextMenu && <><span>Video settings</span><CaretRight /></>}
     </button>
     {open && createPortal(<div ref={menuRef} id={id} className="playback-settings-menu video-settings-menu" role="dialog" aria-labelledby={id + '-title'}
       data-side={placement.side} data-animate={animate}
       style={{ left: placement.left, top: placement.top, width: placement.width, maxHeight: placement.maxHeight,
-        '--popover-anchor-x': placement.anchor + 'px' } as CSSProperties}
+        '--popover-anchor-x': placement.anchor + 'px', '--popover-anchor-y': placement.anchor + 'px' } as CSSProperties}
       onClick={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()}
       onContextMenu={event => { event.preventDefault(); event.stopPropagation(); }}
       onBlur={event => { if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node) && !rootRef.current?.contains(event.relatedTarget as Node)) close(); }}
       onKeyDown={event => {
         event.stopPropagation();
-        if (event.key === 'Escape') { event.preventDefault(); close(true); }
+        if (event.key === 'Escape' || (contextMenu && event.key === 'ArrowLeft' && !(event.target instanceof HTMLInputElement))) { event.preventDefault(); close(true); }
         if (event.key === 'Tab') {
           const controls = Array.from(menuRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled),input') || []);
           if ((!event.shiftKey && document.activeElement === controls.at(-1)) || (event.shiftKey && document.activeElement === controls[0])) {
