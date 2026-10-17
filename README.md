@@ -176,6 +176,10 @@ Virelo binds to `127.0.0.1` by default. To access it from another device on a tr
 npx virelo --host 0.0.0.0
 ```
 
+Startup prints a URL for every detected IPv4 address the server listens on, including Wi-Fi, Ethernet, VPN and virtual adapters, with adapter names. With `--host ::`, it also prints browser-compatible IPv6 addresses (and IPv4 addresses if dual-stack listening is available). Scoped/link-local IPv6 addresses that browsers cannot open are omitted. URLs use the actual selected port, including `--random-port`.
+
+Local-only startup explains how to enable network access. Displayed addresses do not guarantee reachability: routing, firewall rules and Virelo's Host allowlist still apply.
+
 Virelo does not include user accounts or authentication. Use LAN binding only on a network you trust, or put an authenticated reverse proxy in front of it.
 
 See [SECURITY.md](SECURITY.md) before exposing Virelo beyond the host computer.

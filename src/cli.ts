@@ -4,6 +4,7 @@ import open from 'open';
 import { defaultDataDir, ensureDataDirs } from './config.js';
 import { CliUsageError, DEFAULT_PORT, parseCliArgs } from './cli-options.js';
 import { VIRELO_VERSION } from './version.js';
+import { acceptsIpv4, networkUrls, serverUrl } from './network-urls.js';
 
 function usage() {
   console.log(`Virelo — personal media server
@@ -55,9 +56,25 @@ async function main() {
   ensureDataDirs(dataDir);
   const { startServer } = await loadServer();
   const { app, port } = await startServer({ dataDir, host: options.host, port: options.port, mediaPaths: options.mediaPaths });
-  const browserHost = options.host === '0.0.0.0' || options.host === '::' ? '127.0.0.1' : options.host;
-  const url = `http://${browserHost}:${port}`;
-  console.log(`\nVirelo is ready\n  Local:  ${url}\n  Media:  ${options.mediaPaths.join(', ')}\n  Data:   ${dataDir}${options.host === '0.0.0.0' ? `\n  LAN:    http://<your-lan-ip>:${port}` : ''}\n`);
+  const address = app.server.address();
+  const boundHost = address && typeof address === 'object' ? address.address : options.host;
+  const browserHost = boundHost === '0.0.0.0' ? '127.0.0.1' : boundHost === '::' ? '::1' : options.host;
+  const url = serverUrl(browserHost, port);
+  console.log(`\nVirelo is ready\n  Local:  ${url}\n  Media:  ${options.mediaPaths.join(', ')}\n  Data:   ${dataDir}`);
+  if (boundHost === '127.0.0.1' || boundHost === '::1' || boundHost.startsWith('127.')) {
+    console.log('  Network: local access only. Use --host 0.0.0.0 to share on a trusted network.');
+  } else {
+    try {
+      const addresses = networkUrls(boundHost, port, undefined, boundHost === '::' && await acceptsIpv4(port, app.server));
+      console.log('  Network:');
+      for (const entry of addresses) console.log(`    ${entry.url}  (${entry.name})`);
+      if (!addresses.length) console.log('    No browser-compatible network addresses detected. Check your network connection.');
+      console.log('  Access depends on the chosen network, firewall and Host allowlist. No authentication is enabled.');
+    } catch {
+      console.log('  Network: address detection unavailable. Check your network adapter settings.');
+    }
+  }
+  console.log();
   if (options.openBrowser) void open(url).catch(() => undefined);
 
   const shutdown = async () => {
