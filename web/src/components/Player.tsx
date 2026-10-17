@@ -9,6 +9,7 @@ import { hasPlaybackTrackPreference, resolvePlaybackTrackSelection, savePlayback
 import { toggleFullscreen } from '../utils/fullscreen';
 import { DraggableCaption, HiddenSubtitleTrack } from './DraggableCaption';
 import { FavoriteButton } from './FavoriteButton';
+import { useAccount } from './AccountSession';
 import { PlaybackSettingsMenu } from './PlaybackSettingsMenu';
 import { RepeatControl } from './RepeatControl';
 import { PlayerActionMenu } from './PlayerActionMenu';
@@ -39,6 +40,7 @@ const DIRECT_AUDIO_CODECS=new Set(['aac','flac','mp3','opus','vorbis']);
 type HlsInstance=InstanceType<(typeof import('hls.js/light'))['default']>;
 
 export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=true,canGoPrev=true,autoPlay,repeatMode,onRepeatChange}:PlayerProps) {
+  const canTranscode=useAccount()?.user.permissions.transcode!==false;
   const localPlayback=isLocalPlaybackHost();
   const videoRef = useRef<HTMLVideoElement>(null);
   const sourceTransition = useRef(false);
@@ -68,7 +70,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
   const { fallback, error, startFallback, release:releaseFallback,needsSeek:needsFallbackSeek } = useHlsFallback(item, videoRef, wantsPlayback, sourceTransition);
   const {state:qualityState,error:qualityError,start:startQuality,selectedQuality,activeQuality,qualityOptions,setQuality,playbackBlocked,release:releaseQuality,needsSeek:needsQualitySeek}=useAdaptiveQuality(item,videoRef,releaseFallback,wantsPlayback,sourceTransition);
   const [qualitySelectionError,setQualitySelectionError] = useState('');
-  const [qualityPreference,setQualityPreference] = useState(()=>readQualityPreference(!localPlayback));
+  const [qualityPreference,setQualityPreference] = useState(()=>readQualityPreference(!localPlayback,canTranscode));
   const [playbackInfo,setPlaybackInfo] = useState<PlaybackInfo|null>(null);
   const [selectedAudio,setSelectedAudio] = useState<number|null>(null);
   const [selectedSubtitle,setSelectedSubtitle] = useState<number|null>(null);
@@ -119,7 +121,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
     audioSourceToken.current++;
     videoFallbackRequested.current=false;
     qualityRequested.current=true;
-    playbackBlocked.current=typeof readQualityPreference(!localPlayback)==='number';
+    playbackBlocked.current=typeof readQualityPreference(!localPlayback,canTranscode)==='number';
     setQualitySelectionError('');
     if(autoBufferTimer.current!==null)window.clearTimeout(autoBufferTimer.current);
     autoBufferTimer.current=null;
@@ -151,10 +153,10 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
     api.playbackInfo(item.id).then(async(info)=>{
       if(!alive)return;
       setPlaybackInfo(info);
-      const audio=resolvePlaybackTrackSelection('audio',info.audioTracks,info.defaultAudioStream);
+      const audio=canTranscode?resolvePlaybackTrackSelection('audio',info.audioTracks,info.defaultAudioStream):info.defaultAudioStream;
       setSelectedAudio(audio);
       setSelectedSubtitle(resolvePlaybackTrackSelection('subtitles',info.subtitleTracks,null));
-      const preference=readQualityPreference(!localPlayback);
+      const preference=readQualityPreference(!localPlayback,canTranscode);
       setQualityPreference(preference);
       const preferredQuality=resolvePreferredQuality(info.qualityOptions,preference);
       setQuality(preferredQuality);
@@ -193,7 +195,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
       setPlaybackReady(false);
     }).catch((reason)=>{
       if(!alive)return;
-      if(typeof readQualityPreference(!localPlayback)==='number'){
+      if(typeof readQualityPreference(!localPlayback,canTranscode)==='number'){
         playbackBlocked.current=true;
         sourceTransition.current=true;
         videoRef.current?.pause();
@@ -207,7 +209,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
       if(wantsPlayback.current)requestVideoPlayback();
     });
     return()=>{alive=false;audioToken.current++;};
-  },[autoPlay,item.id,localPlayback,setQuality,startQuality,startFallback]);
+  },[autoPlay,item.id,localPlayback,setQuality,startQuality,startFallback,canTranscode]);
 
   useEffect(()=>{
     if(qualityState!=='active')return;
@@ -560,13 +562,14 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
   }
 
   function selectAudio(stream:number){
-    if(playbackInfo&&savePlaybackTrackSelection('audio',playbackInfo.audioTracks,stream))void prepareAudio(stream);
+    if(canTranscode&&playbackInfo&&savePlaybackTrackSelection('audio',playbackInfo.audioTracks,stream))void prepareAudio(stream);
   }
   function selectSubtitle(stream:number|null){
     if(playbackInfo&&savePlaybackTrackSelection('subtitles',playbackInfo.subtitleTracks,stream))setSelectedSubtitle(stream);
   }
 
   async function selectQuality(preference:QualityPreference){
+    if(!canTranscode&&preference!=='source')return;
     const video=videoRef.current;
     const position=video?.currentTime||current;
     saveQualityPreference(preference);
@@ -640,7 +643,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
       src={`/api/media/${item.id}/stream`}
       playsInline
       loop={repeat==='one'||(repeat==='queue'&&queue?.length===1)}
-      preload={typeof readQualityPreference(!localPlayback)==='number'?'none':autoPlay?'auto':'metadata'}
+      preload={typeof readQualityPreference(!localPlayback,canTranscode)==='number'?'none':autoPlay?'auto':'metadata'}
       autoPlay={false}
       crossOrigin="anonymous"
       onClick={handleVideoClick}
@@ -716,6 +719,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
           qualityPreference={qualityPreference}
           activeQuality={activeQuality}
           allowAutoQuality={!localPlayback}
+          allowConversion={canTranscode}
           busy={audioPreparing||fallback==='starting'||qualityState==='starting'}
           onSelectAudio={selectAudio}
           onSelectSubtitle={selectSubtitle}

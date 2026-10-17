@@ -2,11 +2,13 @@
 
 ## Reporting a vulnerability
 
-Do not open a public issue for a suspected vulnerability. Use GitHub private vulnerability reporting for the `Riyoway/virelo` repository and include the affected version, reproduction steps, and expected impact.
+Do not open a public issue for a suspected vulnerability. Use GitHub private vulnerability reporting for the `VireloHQ/Virelo` repository and include the affected version, reproduction steps, and expected impact.
 
 ## Network exposure
 
-Virelo binds to `127.0.0.1` by default. Binding to `0.0.0.0` makes the service reachable from other devices, but Virelo does not include application-level authentication. Use only a trusted LAN or an authenticated reverse proxy.
+Virelo binds to `127.0.0.1` by default. All media, catalog and management APIs require an account, even on localhost. Only the account-status, login, initial-setup and logout endpoints are public. Initial administrator setup is restricted to a direct loopback connection and is atomic. The login screen does not list accounts.
+
+Binding to `0.0.0.0` makes the service reachable from other devices. Authentication is not transport encryption: HTTP exposes credentials and cookies to anyone able to observe the connection. Use only a trusted LAN, a trusted VPN, or an HTTPS reverse proxy. At an HTTPS-terminating proxy, set `VIRELO_SECURE_COOKIES=1` on Virelo so session cookies are never sent over HTTP. Configure the proxy to overwrite, not append untrusted client forwarding headers. Virelo does not enable `trustProxy`.
 
 Do not expose the Virelo HTTP port directly to the public internet.
 
@@ -21,3 +23,25 @@ VIRELO_TRUSTED_HOSTS=media.example.com virelo --host 0.0.0.0
 ```
 
 This allowlist does not provide authentication.
+
+State-changing API requests require `X-Virelo-Request: 1` in addition to a valid session. Cross-origin requests are rejected and cross-origin credential sharing is not enabled. Session cookies are host-only, HttpOnly and SameSite=Strict. Passwords are stored using salted scrypt (N=32768, r=8, p=3); plaintext passwords and raw session tokens are not stored. Hashing concurrency and login attempts are bounded. Sessions expire after seven days at most or 24 hours without requests, with up to 32 sessions per account.
+
+## Permissions and revocation
+
+Library allowlists are checked on the server for collections, media IDs, source streams, range requests, artwork, subtitles and cached/converted playback. Hidden media returns 404. Viewer responses omit filesystem paths. Media and API responses use private, no-store caching; the service worker caches only the public application shell.
+
+New users have no library access by default. Favorites and watch history are account-specific; only the first administrator inherits legacy personal data. Global settings, bulk metadata reset and account administration require administrator status. Regular users may receive specific playback, transcoding, library-management, scanning and metadata-editing permissions. Library management permits access to folders readable by the server and must only be granted to trusted users.
+
+Changes to passwords, names, roles, permissions or enabled state revoke that user's sessions and close their active media responses. Deleting an account removes its personal state, not media files. The final enabled administrator cannot be disabled, demoted or deleted. Signing out clears the current session and its active media responses; tabs on the same origin synchronize account changes when browser messaging/storage is available. Data already downloaded, cached by older versions or buffered by a client cannot be recalled. Do not share an OS/browser profile when that distinction matters.
+
+Administrators have full administrative trust even if their browsing is restricted to selected libraries: they can grant themselves access. This feature does not isolate mutually untrusted administrators or protect against someone who can read or modify the data directory. Protect OS permissions and backups accordingly.
+
+## Localhost-only administrators
+
+The optional Account Manager restriction blocks administrator accounts unless the direct socket peer is loopback and there are no forwarding headers. It applies to login and existing sessions, not just management endpoints. Regular users remain accessible over the network. Change the restriction only from a direct localhost connection on the server PC; changing it revokes other administrator sessions.
+
+**A local reverse proxy, SSH tunnel, or port forward can make a remote client appear to be localhost.** No HTTP application can recover an original address that such an intermediary discards. Do not use the localhost-only option as a guarantee against remote access behind a header-stripping loopback proxy or tunnel. Preserve forwarding headers (Virelo treats those connections as non-local), and enforce remote administrative restrictions at the proxy/firewall as well. This setting is not an OS-level sandbox.
+
+## Local administrator recovery
+
+Stop the server and run `virelo --data <existing-data-directory> --reset-password <administrator-username>` on the server PC. A temporary password is printed to the terminal; change it immediately after signing in on localhost. Recovery requires filesystem access, does not run through an HTTP endpoint, and revokes that administrator's sessions. Treat the terminal output as a secret. Keep the data directory private and avoid capturing recovery output in shared logs.

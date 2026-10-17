@@ -2,6 +2,7 @@ import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { parseMediaName } from './scanner.js';
 import { buildHome } from './home.js';
+import type { CatalogScope } from './auth-types.js';
 import type { AppSettings, FolderEntry, Library, MediaRecord, MediaKind, ShortsFeed, ShortsItem, SortKey } from './types.js';
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -162,15 +163,15 @@ export class VireloDB {
     return true;
   }
 
-  visibleLibraries(): Library[] {
+  visibleLibraries(scope?: CatalogScope): Library[] {
     const settings = this.getSettings();
-    if (settings.showAllLibraries) return this.listLibraries();
     const cwd = process.cwd();
-    return this.listLibraries().filter((l) => this.sessionPinned.has(l.id) || VireloDB.pathInside(l.path, cwd));
+    return this.listLibraries().filter(l => (settings.showAllLibraries || this.sessionPinned.has(l.id) || VireloDB.pathInside(l.path, cwd))
+      && (!scope || scope.libraryIds === null || scope.libraryIds.includes(l.id)));
   }
 
-  private visibleIdClause(): { sql: string; params: SQLInputValue[] } {
-    const ids = this.visibleLibraries().map((l) => l.id);
+  private visibleIdClause(scope?: CatalogScope): { sql: string; params: SQLInputValue[] } {
+    const ids = this.visibleLibraries(scope).map((l) => l.id);
     return ids.length
       ? { sql: `m.library_id IN (${ids.map(() => '?').join(',')})`, params: ids }
       : { sql: '0=1', params: [] };
@@ -192,15 +193,20 @@ export class VireloDB {
     return this.db.prepare('SELECT * FROM media WHERE path=?').get(path) as unknown as MediaRecord | undefined;
   }
 
-  getMedia(id: number): MediaRecord | undefined {
+  private personalJoins(scope?: CatalogScope) {
+    return scope ? { sql: 'LEFT JOIN user_progress p ON p.media_id=m.id AND p.user_id=? LEFT JOIN user_likes l ON l.media_id=m.id AND l.user_id=?', params: [scope.userId, scope.userId] }
+      : { sql: 'LEFT JOIN progress p ON p.media_id=m.id LEFT JOIN likes l ON l.media_id=m.id', params: [] };
+  }
+
+  getMedia(id: number, scope?: CatalogScope): MediaRecord | undefined {
+    const joins = this.personalJoins(scope), visible = scope ? this.visibleIdClause(scope) : { sql: '1=1', params: [] };
     return this.db.prepare(`
       SELECT m.*, p.position AS progress_position, p.duration AS progress_duration, p.completed AS progress_completed,
         (l.media_id IS NOT NULL) AS liked
       FROM media m
-      LEFT JOIN progress p ON p.media_id=m.id
-      LEFT JOIN likes l ON l.media_id=m.id
-      WHERE m.id=?
-    `).get(id) as unknown as MediaRecord | undefined;
+      ${joins.sql}
+      WHERE m.id=? AND ${visible.sql}
+    `).get(...joins.params, id, ...visible.params) as unknown as MediaRecord | undefined;
   }
 
   upsertMedia(input: Omit<MediaRecord, 'id' | 'added_at' | 'updated_at'>): MediaRecord {
@@ -264,10 +270,10 @@ export class VireloDB {
     for (const row of rows) if (!existingPaths.has(row.path)) del.run(row.id);
   }
 
-  listMedia(options: { search?: string; kind?: MediaKind; limit?: number; offset?: number; libraryId?: number; folder?: string; sort?: SortKey; liked?: boolean } = {}) {
+  listMedia(options: { search?: string; kind?: MediaKind; limit?: number; offset?: number; libraryId?: number; folder?: string; sort?: SortKey; liked?: boolean } = {}, scope?: CatalogScope) {
     const clauses: string[] = [];
     const params: SQLInputValue[] = [];
-    const visible = this.visibleIdClause();
+    const visible = this.visibleIdClause(scope), joins = this.personalJoins(scope);
     clauses.push(visible.sql);
     params.push(...visible.params);
     if (options.search) {
@@ -288,27 +294,26 @@ export class VireloDB {
       SELECT m.*,p.position AS progress_position,p.duration AS progress_duration,p.completed AS progress_completed,
         (l.media_id IS NOT NULL) AS liked
       FROM media m
-      LEFT JOIN progress p ON p.media_id=m.id
-      LEFT JOIN likes l ON l.media_id=m.id ${where}
+      ${joins.sql} ${where}
       ORDER BY ${orderBy} LIMIT ? OFFSET ?
-    `).all(...params,limit,offset) as unknown as MediaRecord[];
+    `).all(...joins.params,...params,limit,offset) as unknown as MediaRecord[];
   }
 
-  getHome() {
-    const visible = this.visibleIdClause();
+  getHome(scope?: CatalogScope) {
+    const visible = this.visibleIdClause(scope), joins = this.personalJoins(scope);
     // Curate one visible catalog snapshot; only bounded shelves are sent to clients.
     const items = this.db.prepare(`SELECT m.*,p.position AS progress_position,
       p.duration AS progress_duration,p.completed AS progress_completed,p.updated_at AS progress_updated_at,
       (l.media_id IS NOT NULL) AS liked
-      FROM media m LEFT JOIN progress p ON p.media_id=m.id LEFT JOIN likes l ON l.media_id=m.id
-      WHERE ${visible.sql} ORDER BY m.added_at DESC,m.id DESC`).all(...visible.params) as unknown as MediaRecord[];
+      FROM media m ${joins.sql}
+      WHERE ${visible.sql} ORDER BY m.added_at DESC,m.id DESC`).all(...joins.params,...visible.params) as unknown as MediaRecord[];
     return buildHome(items);
   }
 
 
-  listMetadataCandidates(limit = 500, includeMissingArtwork = false): MediaRecord[] {
+  listMetadataCandidates(limit = 500, includeMissingArtwork = false, scope?: CatalogScope): MediaRecord[] {
     const safeLimit = Math.min(Math.max(limit, 1), 5000);
-    const visible = this.visibleIdClause();
+    const visible = this.visibleIdClause(scope);
     return this.db.prepare(`
       SELECT m.*,p.position AS progress_position,p.duration AS progress_duration,p.completed AS progress_completed,
         (l.media_id IS NOT NULL) AS liked
@@ -318,7 +323,7 @@ export class VireloDB {
     `).all(...visible.params, includeMissingArtwork ? 1 : 0, safeLimit) as unknown as MediaRecord[];
   }
 
-  getShorts(options: { limit?: number; offset?: number; seed?: number; startId?: number; includeLandscapes?: boolean } = {}): ShortsFeed {
+  getShorts(options: { limit?: number; offset?: number; seed?: number; startId?: number; includeLandscapes?: boolean } = {}, scope?: CatalogScope): ShortsFeed {
     const requestedLimit = Number.isFinite(options.limit) ? Number(options.limit) : 50;
     const requestedOffset = Number.isFinite(options.offset) ? Number(options.offset) : 0;
     const limit = Math.min(Math.max(Math.trunc(requestedLimit), 1), 500);
@@ -326,19 +331,19 @@ export class VireloDB {
     const startId = Number.isSafeInteger(options.startId) && Number(options.startId) > 0 ? Number(options.startId) : 0;
     const dims = '(m.width IS NOT NULL AND m.height IS NOT NULL AND m.width>0 AND m.height>0)';
     const cond = options.includeLandscapes ? dims : `${dims} AND m.height>m.width`;
-    const visible = this.visibleIdClause();
+    const visible = this.visibleIdClause(scope), joins = this.personalJoins(scope);
     const items = this.db.prepare(`
       SELECT m.*,p.position AS progress_position,p.duration AS progress_duration,p.completed AS progress_completed,(l.media_id IS NOT NULL) AS liked
-      FROM media m LEFT JOIN progress p ON p.media_id=m.id LEFT JOIN likes l ON l.media_id=m.id
+      FROM media m ${joins.sql}
       WHERE ${visible.sql} AND ${cond}
       ORDER BY (m.id=?) DESC,shorts_rank(m.id,?),m.id LIMIT ? OFFSET ?
-    `).all(...visible.params, startId, Number.isFinite(options.seed) ? Number(options.seed) >>> 0 : 0, limit, offset) as unknown as ShortsItem[];
+    `).all(...joins.params,...visible.params, startId, Number.isFinite(options.seed) ? Number(options.seed) >>> 0 : 0, limit, offset) as unknown as ShortsItem[];
     const total = Number((this.db.prepare(`SELECT COUNT(*) c FROM media m WHERE ${visible.sql} AND ${cond}`).get(...visible.params) as {c:number}).c);
     return { items, total };
   }
 
-  getFolders(): FolderEntry[] {
-    const visible = this.visibleIdClause();
+  getFolders(scope?: CatalogScope): FolderEntry[] {
+    const visible = this.visibleIdClause(scope);
     return this.db.prepare(`
       SELECT library_id, folder, COUNT(*) AS count FROM media m
       WHERE ${visible.sql}
@@ -346,15 +351,25 @@ export class VireloDB {
     `).all(...visible.params) as unknown as FolderEntry[];
   }
 
-  setLike(mediaId: number, liked: boolean) {
+  setLike(mediaId: number, liked: boolean, userId?: number) {
+    if (userId !== undefined) {
+      if (liked) this.db.prepare('INSERT OR IGNORE INTO user_likes(user_id,media_id,created_at) VALUES(?,?,?)').run(userId,mediaId,Date.now());
+      else this.db.prepare('DELETE FROM user_likes WHERE user_id=? AND media_id=?').run(userId,mediaId);
+      return;
+    }
     if (liked) this.db.prepare('INSERT OR IGNORE INTO likes(media_id,created_at) VALUES(?,?)').run(mediaId, Date.now());
     else this.db.prepare('DELETE FROM likes WHERE media_id=?').run(mediaId);
   }
 
-  setProgress(mediaId: number, position: number, duration: number) {
+  setProgress(mediaId: number, position: number, duration: number, userId?: number) {
     const safePosition = Number.isFinite(position) ? Math.max(position, 0) : 0;
     const safeDuration = Number.isFinite(duration) ? Math.max(duration, 0) : 0;
     const completed = safeDuration > 0 && safePosition / safeDuration >= 0.92 ? 1 : 0;
+    if (userId !== undefined) {
+      this.db.prepare(`INSERT INTO user_progress(user_id,media_id,position,duration,completed,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(user_id,media_id) DO UPDATE SET position=excluded.position,duration=excluded.duration,completed=excluded.completed,updated_at=excluded.updated_at`)
+        .run(userId,mediaId,safePosition,safeDuration,completed,Date.now());
+      return;
+    }
     this.db.prepare(`INSERT INTO progress(media_id,position,duration,completed,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(media_id) DO UPDATE SET position=excluded.position,duration=excluded.duration,completed=excluded.completed,updated_at=excluded.updated_at`)
       .run(mediaId, safePosition, safeDuration, completed, Date.now());
   }

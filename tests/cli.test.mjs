@@ -29,6 +29,11 @@ test('supports automatic port selection', () => {
   assert.equal(parseCliArgs(['--random-port']).port, 0);
 });
 
+test('parses local administrator recovery without treating an empty username as a server start', () => {
+  assert.equal(parseCliArgs(['--reset-password','owner']).resetPassword,'owner');
+  assert.throws(()=>parseCliArgs(['--reset-password',' ']),CliUsageError);
+});
+
 test('rejects unknown options and invalid ports', () => {
   assert.throws(() => parseCliArgs(['--wat']), CliUsageError);
   assert.throws(() => parseCliArgs(['--port', '-1']), CliUsageError);

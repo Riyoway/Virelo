@@ -13,6 +13,14 @@ function storage(values={}) {
 }
 const qualities=(...heights)=>heights.map(height=>({height}));
 
+test('accounts without conversion access use the original without overwriting the saved quality',async()=>{
+  const entries=storage();const q=await fresh();q.saveQualityPreference(720);
+  assert.equal(q.readQualityPreference(true,false),'source');
+  assert.equal(q.readQualityPreference(false,false),'source');
+  assert.equal(entries.get('virelo-playback-quality:v1'),'720');
+  assert.equal(q.readQualityPreference(true),720);
+});
+
 test('Original Quality is stored separately from a fixed source-height selection',async()=>{
   const entries=storage();let q=await fresh();
   q.saveQualityPreference(1080);

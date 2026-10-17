@@ -24,7 +24,7 @@ for (const host of ['127.0.0.1', '0.0.0.0']) {
         child.stderr.on('data', chunk => { error += chunk; });
         child.stdout.on('data', chunk => {
           output += chunk;
-          if (output.includes('Network: local access only.') || output.includes('No authentication is enabled.')) {
+          if (output.includes('Network: local access only.') || output.includes('Access requires a Virelo account.')) {
             clearTimeout(timer); accept(output);
           }
         });
@@ -34,7 +34,8 @@ for (const host of ['127.0.0.1', '0.0.0.0']) {
       assert.ok(local, ready);
       const port = Number(local[2]);
       assert.ok(port > 0 && port <= 65535);
-      assert.equal((await fetch(local[1] + '/api/settings')).status, 200);
+      assert.equal((await fetch(local[1] + '/api/settings')).status, 401);
+      assert.equal((await fetch(local[1] + '/api/auth/status')).status, 200);
       if (host === '127.0.0.1') {
         assert.match(ready, /--host 0\.0\.0\.0/);
         assert.ok(!ready.includes('  Network:\n'));
@@ -42,7 +43,7 @@ for (const host of ['127.0.0.1', '0.0.0.0']) {
         const expected = networkUrls(host, port);
         for (const entry of expected) assert.ok(ready.includes(`${entry.url}  (${entry.name})`), entry.name);
         if (!expected.length) assert.match(ready, /No browser-compatible network addresses detected/);
-        assert.match(ready, /firewall and Host allowlist/);
+        assert.match(ready, /Access requires a Virelo account/);
       }
     } finally {
       if (child && child.exitCode === null && child.signalCode === null) {

@@ -203,10 +203,10 @@ export async function refreshMetadata(db: VireloDB, dataDir: string, mediaId: nu
     : refreshCinemetaMetadata(db, dataDir, media);
 }
 
-export async function refreshMissingMetadata(db: VireloDB, dataDir: string, onProgress?: (done: number, total: number) => void) {
+export async function refreshMissingMetadata(db: VireloDB, dataDir: string, onProgress?: (done: number, total: number) => void, scope?: import('./auth-types.js').CatalogScope) {
   const settings = db.getSettings();
   if (!settings.externalMetadataEnabled) return { attempted: 0, updated: 0, failed: 0 };
-  const candidates = db.listMetadataCandidates(5000, settings.externalImagesEnabled);
+  const candidates = db.listMetadataCandidates(5000, settings.externalImagesEnabled, scope);
   let updated = 0;
   let failed = 0;
   for (let index = 0; index < candidates.length; index++) {

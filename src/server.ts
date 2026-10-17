@@ -14,6 +14,8 @@ import { adaptiveTranscodeStatus, audioTranscodeStatus, extractSubtitleVtt, star
 import type { AppSettings, MediaKind, ScanStatus, SortKey } from './types.js';
 import { VIRELO_VERSION } from './version.js';
 import { demandManifest, demandSegment, initializeDemandCache } from './demand-playback.js';
+import { registerAccounts } from './auth.js';
+import type { CatalogScope } from './auth-types.js';
 
 const SORT_KEYS: SortKey[] = ['title', 'newest', 'oldest', 'year', 'duration', 'random'];
 
@@ -68,7 +70,7 @@ export async function createVireloServer(config: RuntimeConfig) {
   ensureDataDirs(config.dataDir);
   await initializeDemandCache(config.dataDir);
   const db = new VireloDB(config.dataDir);
-  const app = Fastify({ logger: { level: process.env.VIRELO_LOG_LEVEL || 'info' }, bodyLimit: 1024 * 1024 });
+  const app = Fastify({ logger: { level: process.env.VIRELO_LOG_LEVEL || 'info', redact: ['req.headers.cookie','req.headers.authorization','res.headers.set-cookie'] }, bodyLimit: 1024 * 1024 });
   app.addHook('onRequest', async (request, reply) => {
     const hostHeader = request.headers.host || '';
     const hostname = hostWithoutPort(hostHeader);
@@ -94,6 +96,7 @@ export async function createVireloServer(config: RuntimeConfig) {
     return payload;
   });
   const webRoot = fileURLToPath(new URL('./web', import.meta.url));
+  const { accounts, fresh } = registerAccounts(app, db);
   let watcher: FSWatcher | null = null;
   let watchDebounce: NodeJS.Timeout | null = null;
 
@@ -112,18 +115,18 @@ export async function createVireloServer(config: RuntimeConfig) {
     running: false, startedAt: null, finishedAt: null, total: 0, scanned: 0, added: 0, updated: 0, skipped: 0, errors: 0, message: 'Idle'
   };
 
-  async function runScan() {
+  async function runScan(scope?: CatalogScope) {
     if (scanStatus.running) return false;
     Object.assign(scanStatus, { running: true, startedAt: Date.now(), finishedAt: null, total: 0, scanned: 0, added: 0, updated: 0, skipped: 0, errors: 0, message: 'Starting scan' });
     void (async () => {
       try {
-        await scanAll(db, config.dataDir, scanStatus);
+        await scanAll(db, config.dataDir, scanStatus, scope);
         const settings = db.getSettings();
         if (settings.externalMetadataEnabled) {
           scanStatus.message = 'Matching metadata';
           const result = await refreshMissingMetadata(db, config.dataDir, (done, total) => {
             scanStatus.message = `Matching metadata · ${done}/${total}`;
-          });
+          }, scope);
           scanStatus.message = result.attempted ? `Scan complete · ${result.updated} metadata matches` : 'Scan complete';
         } else {
           scanStatus.message = 'Scan complete';
@@ -166,7 +169,8 @@ export async function createVireloServer(config: RuntimeConfig) {
       });
   }
 
-  app.get('/api/health', async () => ({ ok: true, version: VIRELO_VERSION, ffmpeg: await hasFfmpeg(), ffprobe: await hasFfprobe(), scan: scanStatus }));
+  const visibleScanStatus = (isAdmin: boolean) => isAdmin ? scanStatus : { ...scanStatus, message: scanStatus.running ? 'Scanning libraries' : 'Idle', total:0,scanned:0,added:0,updated:0,skipped:0,errors:0 };
+  app.get('/api/health', async request => ({ ok: true, version: VIRELO_VERSION, ffmpeg: await hasFfmpeg(), ffprobe: await hasFfprobe(), scan: visibleScanStatus(request.account!.isAdmin) }));
   app.get('/api/settings', async () => publicSettings(db.getSettings()));
   app.post<{ Body: Partial<AppSettings> & { tmdbApiKey?: string; clearTmdbApiKey?: boolean } }>('/api/settings', async (request) => {
     const body = request.body || {};
@@ -183,9 +187,9 @@ export async function createVireloServer(config: RuntimeConfig) {
     return publicSettings(updatedSettings);
   });
 
-  app.get('/api/libraries', async () => db.visibleLibraries());
+  app.get('/api/libraries', async request => db.visibleLibraries(request.catalogScope!));
   app.post<{ Body: { path?: string; label?: string } }>('/api/libraries', async (request, reply) => {
-    const raw = request.body?.path?.trim();
+    const raw = typeof request.body?.path === 'string' ? request.body.path.trim() : '';
     if (!raw) return reply.code(400).send({ error: 'path is required' });
     const path = resolve(raw);
     try {
@@ -194,9 +198,14 @@ export async function createVireloServer(config: RuntimeConfig) {
     } catch {
       return reply.code(400).send({ error: 'Directory does not exist or cannot be read.' });
     }
-    const library = db.addLibrary(path, request.body?.label?.trim() || basename(path) || path);
+    const user = fresh(request);
+    if (!user.permissions.manageLibraries) return reply.code(403).send({ error: 'Library management is not allowed.' });
+    const label = typeof request.body?.label === 'string' ? request.body.label.trim().slice(0,200) : '';
+    const library = db.addLibrary(path, label || basename(path) || path);
+    if (!user.allLibraries) accounts.grantLibrary(user.id, library.id);
     await refreshWatcher();
-    await runScan();
+    const current = accounts.get(user.id);
+    if (current) await runScan({userId:current.id,libraryIds:[library.id]});
     return library;
   });
   app.delete<{ Params: { id: string } }>('/api/libraries/:id', async (request, reply) => {
@@ -207,9 +216,9 @@ export async function createVireloServer(config: RuntimeConfig) {
     return { ok: true };
   });
 
-  app.post('/api/scan', async () => ({ started: await runScan(), status: scanStatus }));
-  app.get('/api/scan/status', async () => scanStatus);
-  app.get('/api/home', async () => db.getHome());
+  app.post('/api/scan', async request => ({ started: await runScan(request.catalogScope!), status: visibleScanStatus(request.account!.isAdmin) }));
+  app.get('/api/scan/status', async request => visibleScanStatus(request.account!.isAdmin));
+  app.get('/api/home', async request => db.getHome(request.catalogScope!));
   app.get<{ Querystring: { search?: string; kind?: MediaKind; limit?: string; offset?: string; libraryId?: string; folder?: string; sort?: string; liked?: string } }>('/api/media', async (request) => {
     const q = request.query;
     return db.listMedia({
@@ -221,29 +230,29 @@ export async function createVireloServer(config: RuntimeConfig) {
       folder: q.folder !== undefined ? q.folder.slice(0, 500) : undefined,
       sort: (SORT_KEYS as string[]).includes(q.sort ?? '') ? q.sort as SortKey : 'title',
       liked: q.liked === '1' || q.liked === 'true'
-    });
+    }, request.catalogScope!);
   });
-  app.get('/api/folders', async () => db.getFolders());
+  app.get('/api/folders', async request => db.getFolders(request.catalogScope!));
   app.get<{ Params: { id: string } }>('/api/media/:id', async (request, reply) => {
-    const media = db.getMedia(Number(request.params.id));
+    const media = db.getMedia(Number(request.params.id), request.catalogScope!);
     if (!media) return reply.code(404).send({ error: 'Not found' });
     return media;
   });
   app.post<{ Params: { id: string }; Body: { position?: number; duration?: number } }>('/api/media/:id/progress', async (request, reply) => {
     const id = Number(request.params.id);
-    if (!db.getMedia(id)) return reply.code(404).send({ error: 'Not found' });
-    db.setProgress(id, Number(request.body?.position) || 0, Number(request.body?.duration) || 0);
+    if (!db.getMedia(id, request.catalogScope!)) return reply.code(404).send({ error: 'Not found' });
+    db.setProgress(id, Number(request.body?.position) || 0, Number(request.body?.duration) || 0, request.account!.id);
     return { ok: true };
   });
   app.get<{ Params: { id: string } }>('/api/media/:id/playback', async (request, reply) => {
-    const media = db.getMedia(Number(request.params.id));
+    const media = db.getMedia(Number(request.params.id), request.catalogScope!);
     if (!media || !existsSync(media.path)) return reply.code(404).send({ error: 'Media file not found' });
     const info = await probePlaybackInfo(media.path);
     if (!info) return reply.code(503).send({ error: 'ffprobe is required to inspect audio and subtitle tracks.' });
     return info;
   });
   app.post<{ Params: { id: string }; Body: { audioStream?: number; startTime?: number } }>('/api/media/:id/transcode/start', async (request, reply) => {
-    const media = db.getMedia(Number(request.params.id));
+    const media = db.getMedia(Number(request.params.id), request.catalogScope!);
     if (!media || !existsSync(media.path)) return reply.code(404).send({ error: 'Media file not found' });
     const audioStream = request.body?.audioStream;
     const startTime=request.body?.startTime;
@@ -263,7 +272,7 @@ export async function createVireloServer(config: RuntimeConfig) {
     return transcodeStatus(config.dataDir, Number(request.params.id), audioStream,startTime);
   });
   app.post<{ Params: { id: string }; Body: { audioStream?: number; startTime?: number } }>('/api/media/:id/quality/start', async (request, reply) => {
-    const media=db.getMedia(Number(request.params.id));
+    const media=db.getMedia(Number(request.params.id), request.catalogScope!);
     if(!media||!existsSync(media.path))return reply.code(404).send({error:'Media file not found'});
     const startTime=request.body?.startTime;
     if(startTime!==undefined&&(!Number.isFinite(startTime)||startTime<0||(media.duration&&startTime>=media.duration)))return reply.code(400).send({error:'Invalid seek position.'});
@@ -274,7 +283,7 @@ export async function createVireloServer(config: RuntimeConfig) {
     return startAdaptiveTranscode(config.dataDir,media.id,media.path,{audioStream,hasAudio:info.audioTracks.length>0,sourceWidth:info.width,sourceHeight:info.height,qualities:info.qualityOptions,startTime,duration:media.duration});
   });
   app.get<{ Params: { id: string }; Querystring: { audioStream?: string; startTime?: string } }>('/api/media/:id/quality/status', async (request, reply) => {
-    const media=db.getMedia(Number(request.params.id));
+    const media=db.getMedia(Number(request.params.id), request.catalogScope!);
     if(!media||!existsSync(media.path))return reply.code(404).send({error:'Media file not found'});
     const audioStream=request.query.audioStream===undefined?undefined:Number(request.query.audioStream);
     if(audioStream!==undefined&&(!Number.isInteger(audioStream)||audioStream<0))return reply.code(400).send({error:'Invalid audio stream.'});
@@ -283,7 +292,7 @@ export async function createVireloServer(config: RuntimeConfig) {
     return adaptiveTranscodeStatus(config.dataDir,media.id,audioStream,playbackQualities(media.width,media.height),startTime);
   });
   app.post<{ Params: { id: string }; Body: { audioStream?: number } }>('/api/media/:id/audio/start', async (request, reply) => {
-    const media = db.getMedia(Number(request.params.id));
+    const media = db.getMedia(Number(request.params.id), request.catalogScope!);
     if (!media || !existsSync(media.path)) return reply.code(404).send({ error: 'Media file not found' });
     const audioStream = request.body?.audioStream;
     if (!Number.isInteger(audioStream) || Number(audioStream) < 0) return reply.code(400).send({ error: 'Invalid audio stream.' });
@@ -292,14 +301,14 @@ export async function createVireloServer(config: RuntimeConfig) {
     return startAudioTranscode(config.dataDir, media.id, media.path, Number(audioStream),media.duration);
   });
   app.get<{ Params: { id: string }; Querystring: { audioStream?: string } }>('/api/media/:id/audio/status', async (request, reply) => {
-    const media = db.getMedia(Number(request.params.id));
+    const media = db.getMedia(Number(request.params.id), request.catalogScope!);
     if (!media) return reply.code(404).send({ error: 'Media file not found' });
     const audioStream = Number(request.query.audioStream);
     if (!Number.isInteger(audioStream) || audioStream < 0) return reply.code(400).send({ error: 'Invalid audio stream.' });
     return audioTranscodeStatus(config.dataDir, media.id, audioStream);
   });
   app.get<{ Params: { id: string; stream: string } }>('/api/media/:id/subtitles/:stream', async (request, reply) => {
-    const media = db.getMedia(Number(request.params.id));
+    const media = db.getMedia(Number(request.params.id), request.catalogScope!);
     if (!media || !existsSync(media.path)) return reply.code(404).send({ error: 'Media file not found' });
     const subtitleStream = Number(request.params.stream);
     if (!Number.isInteger(subtitleStream) || subtitleStream < 0) return reply.code(400).send({ error: 'Invalid subtitle stream.' });
@@ -323,31 +332,32 @@ export async function createVireloServer(config: RuntimeConfig) {
       seed: q.seed ? Number(q.seed) : 0,
       startId: q.startId ? Number(q.startId) : undefined,
       includeLandscapes: db.getSettings().shortsIncludeLandscapes
-    });
+    }, request.catalogScope!);
   });
   app.post<{ Params: { id: string }; Body: { liked?: boolean } }>('/api/media/:id/like', async (request, reply) => {
     const id = Number(request.params.id);
-    if (!db.getMedia(id)) return reply.code(404).send({ error: 'Not found' });
+    if (!db.getMedia(id, request.catalogScope!)) return reply.code(404).send({ error: 'Not found' });
     const liked = request.body?.liked === true;
-    db.setLike(id, liked);
+    db.setLike(id, liked, request.account!.id);
     return { ok: true, liked };
   });
 
   app.delete('/api/metadata', async () => db.clearAllExternalMetadata());
 
   app.delete<{ Params: { id: string } }>('/api/media/:id/metadata', async (request, reply) => {
-    const media = db.getMedia(Number(request.params.id));
+    const media = db.getMedia(Number(request.params.id), request.catalogScope!);
     if (!media) return reply.code(404).send({ error: 'Media not found.' });
-    return db.clearExternalMetadata(media.id, parseMediaName(media.path));
+    db.clearExternalMetadata(media.id, parseMediaName(media.path));
+    return db.getMedia(media.id, request.catalogScope!);
   });
 
   app.post<{ Params: { id: string } }>('/api/media/:id/metadata/refresh', async (request, reply) => {
-    try { return await refreshMetadata(db, config.dataDir, Number(request.params.id)); }
+    try { await refreshMetadata(db, config.dataDir, Number(request.params.id)); return db.getMedia(Number(request.params.id), request.catalogScope!); }
     catch (error) { return reply.code(400).send({ error: error instanceof Error ? error.message : 'Metadata refresh failed' }); }
   });
 
   app.get<{ Params: { id: string; kind: string } }>('/api/media/:id/artwork/:kind', async (request, reply) => {
-    const media = db.getMedia(Number(request.params.id));
+    const media = db.getMedia(Number(request.params.id), request.catalogScope!);
     if (!media) return reply.code(404).send();
     const path = request.params.kind === 'poster' ? media.poster_path : request.params.kind === 'backdrop' ? media.backdrop_path : media.thumbnail_path;
     if (!path || !existsSync(path)) return reply.code(404).send();
@@ -356,7 +366,7 @@ export async function createVireloServer(config: RuntimeConfig) {
   });
 
   app.get<{ Params: { id: string } }>('/api/media/:id/stream', async (request, reply) => {
-    const media = db.getMedia(Number(request.params.id));
+    const media = db.getMedia(Number(request.params.id), request.catalogScope!);
     if (!media || !existsSync(media.path)) return reply.code(404).send({ error: 'Media file not found' });
     const info = await stat(media.path);
     const total = info.size;
@@ -431,7 +441,7 @@ export async function createVireloServer(config: RuntimeConfig) {
   });
 
   await refreshWatcher();
-  return { app, db, runScan, scanStatus };
+  return { app, db, accounts, runScan, scanStatus };
 }
 
 export async function startServer(config: RuntimeConfig) {

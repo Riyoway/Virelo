@@ -8,6 +8,7 @@ export interface CliOptions {
   openBrowser: boolean;
   port: number;
   version: boolean;
+  resetPassword?: string;
 }
 
 export const DEFAULT_PORT = 41777;
@@ -19,7 +20,8 @@ export class CliUsageError extends Error {
   }
 }
 
-const VALUE_OPTIONS: ReadonlyMap<string, 'media' | 'data' | 'host' | 'port'> = new Map([
+const VALUE_OPTIONS: ReadonlyMap<string, 'media' | 'data' | 'host' | 'port' | 'reset'> = new Map([
+  ['--reset-password', 'reset'],
   ['--media', 'media'], ['-m', 'media'],
   ['--data', 'data'], ['-d', 'data'],
   ['--host', 'host'], ['-H', 'host'],
@@ -35,6 +37,7 @@ export function parseCliArgs(args: string[], cwd = process.cwd()): CliOptions {
   let openBrowser = true;
   let help = false;
   let version = false;
+  let resetPassword: string | undefined;
   const media: string[] = [];
 
   for (let index = 0; index < args.length; index++) {
@@ -58,6 +61,10 @@ export function parseCliArgs(args: string[], cwd = process.cwd()): CliOptions {
     if (optionType === 'media') media.push(resolve(cwd, value));
     else if (optionType === 'data') data = resolve(cwd, value);
     else if (optionType === 'host') host = value.trim();
+    else if (optionType === 'reset') {
+      if (!value.trim()) throw new CliUsageError('An administrator username is required.');
+      resetPassword = value.trim();
+    }
     else {
       port = Number(value);
       if (!Number.isInteger(port) || port < 0 || port > 65535) {
@@ -68,5 +75,5 @@ export function parseCliArgs(args: string[], cwd = process.cwd()): CliOptions {
 
   if (!host) throw new CliUsageError('Host cannot be empty.');
   const mediaPaths = [...new Set(media.length ? media : [resolve(cwd)])];
-  return { dataDir: data, help, host, mediaPaths, openBrowser, port, version };
+  return { dataDir: data, help, host, mediaPaths, openBrowser, port, version, ...(resetPassword ? {resetPassword} : {}) };
 }

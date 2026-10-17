@@ -30,7 +30,7 @@ Run Virelo in the folder you want to serve:
 npx virelo
 ```
 
-Virelo scans the current directory, starts at `http://127.0.0.1:41777`, and opens the library in your browser.
+Virelo scans the current directory, starts at `http://127.0.0.1:41777`, and opens in your browser. On first use or after upgrading from a version without accounts, create the first administrator using this localhost address on the PC running Virelo, then sign in to your library.
 
 To serve another folder without changing directories:
 
@@ -78,7 +78,7 @@ npx virelo --media "C:\Users\You\Videos" --random-port
 | 🖼️ | **Artwork** | Automatic movie and series metadata, posters, backdrops, and episode images. |
 | 🌐 | **Responsive UI** | Works on desktop, tablet, and mobile screens. |
 | 📦 | **PWA** | Install Virelo as an app when supported by your browser. |
-| 🔒 | **Private by default** | Localhost binding, no accounts, no telemetry, and no advertising. |
+| 🔒 | **Private by default** | Localhost binding, local accounts, per-user library permissions, no telemetry, and no advertising. |
 
 ## 🧭 CLI
 
@@ -91,6 +91,8 @@ virelo [options]
 -p, --port <port>   HTTP port (default: 41777; use 0 for an available port)
     --random-port   Select an available HTTP port automatically
     --no-open       Do not open a browser
+    --reset-password <username>
+                    Recover an administrator's password locally, then exit
 -h, --help          Show help
 -v, --version       Show version
 ```
@@ -181,7 +183,27 @@ Startup prints a URL for every detected IPv4 address the server listens on, incl
 
 Local-only startup explains how to enable network access. Displayed addresses do not guarantee reachability: routing, firewall rules and Virelo's Host allowlist still apply.
 
-Virelo does not include user accounts or authentication. Use LAN binding only on a network you trust, or put an authenticated reverse proxy in front of it.
+The npm server requires a local Virelo account. On first use (including upgrades), open the server's localhost address **on the PC running Virelo** to create the first administrator. Remote devices cannot claim an unconfigured server. Existing favorites and watch history are copied to this first account; video files and libraries are preserved.
+
+In **Settings → Account Manager**, administrators can add, disable or delete users, reset passwords, promote other administrators, and choose each account's allowed libraries. New users see no libraries until granted access. You can select all libraries (including future additions), or an explicit list. Library access applies to search, Home, Shorts, playback, subtitles and artwork, not just navigation. Favorites and watch history are separate for every account.
+
+Playback, transcoding, library management, scanning and metadata editing can be granted separately to regular users. Adding/removing libraries is a trusted filesystem-management permission: that user can add folders readable by the server. Global server settings and Account Manager remain administrator-only. Administrators may limit their own browsing, but can change permissions, so this is not a security boundary between administrators.
+
+Accounts without conversion permission play the original quality and default audio without overwriting saved playback preferences. Source formats unsupported by the browser still need an administrator to allow conversion.
+
+Use **Settings → Account** to change your display name, username or password (with the current password), or sign out. Account and permission changes invalidate existing sessions. Do not share administrator credentials.
+
+Account Manager also offers **Administrators can only access from localhost**. Change this option on the server PC. It blocks all administrator access from non-loopback connections, including normal browsing, while regular users can still connect over the network. Forwarding headers cannot turn a remote request into a local request. A local reverse proxy or tunnel that hides the client address is an exception: see [SECURITY.md](SECURITY.md) before using this option behind a proxy.
+
+If you forget an administrator password, stop Virelo, then run this **locally on the server PC**, using the same data directory:
+
+```bash
+virelo --data /path/to/virelo-data --reset-password your-username
+```
+
+This prints a new temporary password once, re-enables that administrator, and revokes their sessions. Restart Virelo, sign in on localhost and replace the password in Account settings. Omitting `--data` uses the default data directory. Recovery never deletes libraries or video files.
+
+Passwords do not encrypt HTTP traffic. Use a trusted LAN, HTTPS reverse proxy or a trusted VPN; do not expose the HTTP port directly to the internet. For HTTPS termination at a proxy, set `VIRELO_SECURE_COOKIES=1` and configure the trusted Host as described in [SECURITY.md](SECURITY.md).
 
 See [SECURITY.md](SECURITY.md) before exposing Virelo beyond the host computer.
 
@@ -230,7 +252,7 @@ Issues and pull requests are welcome. If you find a bug, include your operating 
 
 ## 🔒 Privacy
 
-Virelo has no telemetry, analytics, advertising, account registration, or automatic update checks. Metadata matching sends parsed filenames and media identifiers only; video files remain on your device. Online metadata and artwork can be disabled in Settings.
+Virelo has no telemetry, analytics, advertising, cloud account registration, or automatic update checks. Server accounts and permissions stay in your local data directory. Metadata matching sends parsed filenames and media identifiers only; video files remain on your device. An administrator can disable online metadata and artwork in Settings.
 
 See [PRIVACY.md](PRIVACY.md) for details.
 

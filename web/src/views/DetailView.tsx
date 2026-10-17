@@ -6,8 +6,10 @@ import { ArrowLeft, ArrowsClockwise, Play } from '@phosphor-icons/react';
 import { api, artwork } from '../api';
 import { FavoriteButton } from '../components/FavoriteButton';
 import { MediaRow } from '../components/MediaRow';
+import { useAccount } from '../components/AccountSession';
 
 export function DetailView() {
+  const account = useAccount()?.user;
   const {mediaId} = useParams({from:'/title/$mediaId'});
   const id = Number(mediaId);
   const navigate = useNavigate();
@@ -35,7 +37,7 @@ export function DetailView() {
           <div className="detail-meta"><span>{item.year || '—'}</span>{item.height && <span>{item.height}p</span>}{item.video_codec && <span>{item.video_codec.toUpperCase()}</span>}{item.duration && <span>{formatDuration(item.duration)}</span>}</div>
           <p>{item.overview || 'No description available.'}</p>
           {item.genres && <div className="genre-line">{item.genres.split(',').map(g=><span key={g}>{g.trim()}</span>)}</div>}
-          <div className="detail-actions"><Button size="lg" onPress={()=>void navigate({to:'/watch/$mediaId',params:{mediaId}})}><Play weight="fill"/> {canResume(item) ? `Resume ${formatTime(item.progress_position || 0)}` : 'Play'}</Button><FavoriteButton item={item} />{settings?.externalMetadataEnabled && <Button size="lg" variant="secondary" isPending={refresh.isPending} onPress={()=>refresh.mutate()}><ArrowsClockwise/> Fetch metadata</Button>}</div>
+          <div className="detail-actions"><Button size="lg" isDisabled={account?.permissions.play===false} onPress={()=>void navigate({to:'/watch/$mediaId',params:{mediaId}})}><Play weight="fill"/> {canResume(item) ? `Resume ${formatTime(item.progress_position || 0)}` : 'Play'}</Button><FavoriteButton item={item} />{settings?.externalMetadataEnabled && account?.permissions.manageMetadata && <Button size="lg" variant="secondary" isPending={refresh.isPending} onPress={()=>refresh.mutate()}><ArrowsClockwise/> Fetch metadata</Button>}</div>
           {refresh.error && <p className="error-copy">{refresh.error.message}</p>}
           <dl className="tech-meta"><div><dt>File</dt><dd>{item.filename}</dd></div><div><dt>Container</dt><dd>{item.container?.toUpperCase() || 'Unknown'}</dd></div><div><dt>Audio</dt><dd>{item.audio_codec?.toUpperCase() || 'Unknown'}</dd></div></dl>
         </div>

@@ -18,6 +18,7 @@ interface PlaybackSettingsMenuProps {
   qualityPreference: QualityPreference;
   activeQuality?: number|null;
   allowAutoQuality?: boolean;
+  allowConversion?: boolean;
   onSelectAudio: (stream: number) => void;
   onSelectSubtitle: (stream: number|null) => void;
   onSelectQuality: (preference: QualityPreference) => void;
@@ -25,7 +26,7 @@ interface PlaybackSettingsMenuProps {
 
 export function PlaybackSettingsMenu({
   audioTracks, subtitleTracks, selectedAudio, selectedSubtitle, busy=false,
-  qualityOptions, selectedQuality, qualityPreference, activeQuality=null, allowAutoQuality=false,
+  qualityOptions, selectedQuality, qualityPreference, activeQuality=null, allowAutoQuality=false, allowConversion=true,
   onSelectAudio, onSelectSubtitle, onSelectQuality
 }: PlaybackSettingsMenuProps) {
   const [open,setOpen] = useState<Setting|null>(null);
@@ -134,7 +135,7 @@ export function PlaybackSettingsMenu({
       if(open&&event.key==='Escape'){event.preventDefault();event.stopPropagation();closeMenu(true);}
     }}>
     {qualityOptions.length>0&&settingButton('quality','Quality',<><MonitorPlay/><span className="playback-quality-label">{displayedQuality}</span></>,displayedQuality)}
-    {audioTracks.length>1&&settingButton('audio','Audio',<Waveform/>,selectedAudioTrack?trackLabel(selectedAudioTrack,'Audio',selectedAudioTrack.typeIndex+1):undefined)}
+    {allowConversion&&audioTracks.length>1&&settingButton('audio','Audio',<Waveform/>,selectedAudioTrack?trackLabel(selectedAudioTrack,'Audio',selectedAudioTrack.typeIndex+1):undefined)}
     {subtitleTracks.length>0&&settingButton('subtitles','Subtitles',<Subtitles weight={selectedSubtitle===null?'regular':'fill'}/>,selectedSubtitleTrack?trackLabel(selectedSubtitleTrack,'Subtitle',selectedSubtitleTrack.typeIndex+1):'Off')}
     {open&&createPortal(<div key={open} ref={menuRef} id={menuId} className="playback-settings-menu" role="menu" aria-label={label} tabIndex={-1}
       data-side={placement.side} data-animate={animateOpen}
@@ -160,13 +161,14 @@ export function PlaybackSettingsMenu({
           <span><strong>Original Quality</strong><small>Uses each video's original resolution</small></span>
           {qualityPreference==='source'&&<Check weight="bold"/>}
         </button>}
-        {open==='quality'&&allowAutoQuality&&<button type="button" role="menuitemradio" tabIndex={-1}
+        {open==='quality'&&!allowConversion&&<p className="account-notice">Video conversion is disabled for this account.</p>}
+        {open==='quality'&&allowAutoQuality&&allowConversion&&<button type="button" role="menuitemradio" tabIndex={-1}
           aria-checked={qualityPreference==='auto'} className={qualityPreference==='auto'?'selected':''}
           disabled={busy} onClick={()=>select(()=>onSelectQuality('auto'))}>
           <span><strong>Auto</strong><small>{activeQuality?`Playing at ${qualityLabel(activeQuality)}`:'Adjusts to your network'}</small></span>
           {qualityPreference==='auto'&&<Check weight="bold"/>}
         </button>}
-        {open==='quality'&&qualityOptions.map((quality,index)=><button type="button" role="menuitemradio" tabIndex={-1}
+        {open==='quality'&&allowConversion&&qualityOptions.map((quality,index)=><button type="button" role="menuitemradio" tabIndex={-1}
           aria-checked={typeof qualityPreference==='number'&&selectedQuality===quality.height} className={typeof qualityPreference==='number'&&selectedQuality===quality.height?'selected':''}
           disabled={busy} key={quality.height} onClick={()=>select(()=>onSelectQuality(quality.height))}>
           <span><strong>{quality.label}</strong><small>{index===0?'Highest available':formatBitrate(quality.bitrate)}</small></span>

@@ -9,8 +9,12 @@ import { Select } from '../components/Select';
 import { SettingsNavigation } from '../components/SettingsNavigation';
 import { ConfirmationDialog } from '../components/ConfirmationDialog';
 import type { QueueBehavior, Settings } from '../types';
+import { useAccount } from '../components/AccountSession';
+import { AccountManager, AccountProfile } from '../components/AccountSettings';
 
 const settingsSections = [
+  { id:'account', label:'Account', description:'Your name, password and sign-in' },
+  { id:'accounts', label:'Account Manager', description:'Users, library access and permissions' },
   { id:'libraries', label:'Libraries', description:'Folders and automatic scanning' },
   { id:'network', label:'Metadata', description:'Titles, posters and artwork' },
   { id:'playback', label:'Playback', description:'What plays next' },
@@ -25,6 +29,11 @@ const QUEUE_OPTIONS = [
 type SettingsSectionId = (typeof settingsSections)[number]['id'];
 
 export function SettingsView(){
+  const session=useAccount();
+  const isAdmin=Boolean(session?.user.isAdmin);
+  const canManageLibraries=Boolean(session?.user.permissions.manageLibraries);
+  const canScan=Boolean(session?.user.permissions.scanLibraries);
+  const sections=settingsSections.filter(section=>isAdmin||['account','libraries','tools'].includes(section.id));
   const client=useQueryClient();
   const settingsQuery=useQuery({queryKey:['settings'],queryFn:api.settings});
   const libraries=useQuery({queryKey:['libraries'],queryFn:api.libraries});
@@ -32,7 +41,7 @@ export function SettingsView(){
   const health=useQuery({queryKey:['health'],queryFn:async()=>{const r=await fetch('/api/health');return r.json() as Promise<{ffmpeg:boolean;ffprobe:boolean}>;}});
   const [form,setForm]=useState<Settings|null>(null);
   const [path,setPath]=useState('');
-  const [activeSection,setActiveSection]=useState<SettingsSectionId>('libraries');
+  const [activeSection,setActiveSection]=useState<SettingsSectionId>('account');
   const [mobileDetail,setMobileDetail]=useState(false);
   const openSection=(id:string)=>{
     setActiveSection(id as SettingsSectionId);
@@ -51,23 +60,26 @@ export function SettingsView(){
   if(!form)return <PageSkeleton kind="settings" />;
   const hasChanges=JSON.stringify(form)!==JSON.stringify(settingsQuery.data);
   return <div className={`content-view settings-view${mobileDetail?' settings-detail-open':''}`}>
-    <header className="settings-heading"><h1>Settings</h1><div className="settings-heading-actions"><span aria-live="polite">{save.isSuccess&&!hasChanges&&<span className="settings-saved"><CheckCircle/> Saved</span>}</span><Button isPending={save.isPending} isDisabled={!hasChanges} onPress={()=>save.mutate()}>Save settings</Button></div></header>
+    <header className="settings-heading"><h1>Settings</h1>{isAdmin&&['libraries','network','playback','shorts'].includes(activeSection)&&<div className="settings-heading-actions"><span aria-live="polite">{save.isSuccess&&!hasChanges&&<span className="settings-saved"><CheckCircle/> Saved</span>}</span><Button isPending={save.isPending} isDisabled={!hasChanges} onPress={()=>save.mutate()}>Save settings</Button></div>}</header>
     {save.error&&<p className="error-copy settings-save-error">{save.error.message}</p>}
 
     <div className="settings-layout">
-      <SettingsNavigation sections={settingsSections} activeSection={activeSection} onSelect={openSection}/>
+      <SettingsNavigation sections={sections} activeSection={activeSection} onSelect={openSection}/>
 
       <div className="settings-content">
         <button type="button" className="settings-back" onClick={closeSection}><ArrowLeft aria-hidden="true"/> All settings</button>
+        {activeSection==='account'&&<div id="settings-panel-account" className="settings-card settings-section"><AccountProfile/></div>}
+        {activeSection==='accounts'&&isAdmin&&<div id="settings-panel-accounts" className="settings-card settings-section"><AccountManager/></div>}
         {activeSection==='libraries'&&<section id="settings-panel-libraries" className="settings-card settings-section" aria-labelledby="settings-title-libraries">
           <div className="settings-card-head"><div><h2 id="settings-title-libraries" tabIndex={-1}>Libraries</h2><p>Manage the folders Virelo scans for media.</p></div></div>
-          <div className="add-library"><Input aria-label="Media folder path" placeholder={navigator.userAgent.includes('Windows')?'D:\\Videos':'/home/user/Videos'} value={path} onChange={(e)=>setPath(e.target.value)}/><Button isPending={add.isPending} onPress={()=>add.mutate()} isDisabled={!path.trim()}><FolderPlus/> Add folder</Button></div>
+          {canManageLibraries&&<div className="add-library"><Input aria-label="Media folder path" placeholder={navigator.userAgent.includes('Windows')?'D:\\Videos':'/home/user/Videos'} value={path} onChange={(e)=>setPath(e.target.value)}/><Button isPending={add.isPending} onPress={()=>add.mutate()} isDisabled={!path.trim()}><FolderPlus/> Add folder</Button></div>}
           {add.error&&<p className="error-copy">{add.error.message}</p>}
-          <div className="library-list">{libraries.data?.map(lib=><div key={lib.id}><div><strong>{lib.label}</strong><span>{lib.path}</span></div><Button isIconOnly variant="ghost" aria-label={`Remove ${lib.label}`} onPress={()=>remove.mutate(lib.id)}><Trash/></Button></div>)}</div>
-          <div className="scan-strip"><div>{scan.data?.running?<ArrowsClockwise className="spin"/>:<CheckCircle/>}<span><strong>{scan.data?.message||'Idle'}</strong>{scan.data?.running&&` · ${scan.data.scanned} scanned`}</span></div><Button variant="secondary" isPending={scan.data?.running} onPress={()=>api.startScan().then(()=>client.invalidateQueries({queryKey:['scan']}))}>Scan</Button></div>
+          <div className="library-list">{libraries.data?.map(lib=><div key={lib.id}><div><strong>{lib.label}</strong>{canManageLibraries&&<span>{lib.path}</span>}</div>{canManageLibraries&&<Button isIconOnly variant="ghost" aria-label={`Remove ${lib.label}`} onPress={()=>remove.mutate(lib.id)}><Trash/></Button>}</div>)}</div>
+          {!libraries.data?.length&&<p className="account-notice">No libraries are available for this account. Ask an administrator to grant access.</p>}
+          <div className="scan-strip"><div>{scan.data?.running?<ArrowsClockwise className="spin"/>:<CheckCircle/>}<span><strong>{scan.data?.message||'Idle'}</strong>{isAdmin&&scan.data?.running&&` · ${scan.data.scanned} scanned`}</span></div>{canScan&&<Button variant="secondary" isPending={scan.data?.running} onPress={()=>api.startScan().then(()=>client.invalidateQueries({queryKey:['scan']})).catch(()=>undefined)}>Scan</Button>}</div>
           <ScanProgress status={scan.data} compact/>
-          <SettingSwitch checked={form.showAllLibraries} onChange={(v)=>setForm({...form,showAllLibraries:v})} title="Show libraries from other folders" description="Include folders added outside the folder where Virelo was started."/>
-          <SettingSwitch checked={form.libraryWatchEnabled} onChange={(v)=>setForm({...form,libraryWatchEnabled:v})} title="Watch local folders" description="Monitor configured folders and scan when files change."/>
+          {isAdmin&&<><SettingSwitch checked={form.showAllLibraries} onChange={(v)=>setForm({...form,showAllLibraries:v})} title="Show libraries from other folders" description="Include folders added outside the folder where Virelo was started."/>
+          <SettingSwitch checked={form.libraryWatchEnabled} onChange={(v)=>setForm({...form,libraryWatchEnabled:v})} title="Watch local folders" description="Monitor configured folders and scan when files change."/></>}
         </section>}
 
         {activeSection==='network'&&<section id="settings-panel-network" className="settings-card settings-section" aria-labelledby="settings-title-network">

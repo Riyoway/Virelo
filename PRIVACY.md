@@ -4,7 +4,9 @@ Virelo runs on the host computer and stores its catalog, settings, thumbnails, w
 
 ## Default behavior
 
-Virelo does not include telemetry, analytics, advertising, account registration, or automatic update checks. New installations match filenames against Cinemeta during library scans and cache the returned metadata and artwork locally. Online matching and artwork downloads can be disabled independently in Settings.
+Virelo does not include telemetry, analytics, advertising, cloud account registration, or automatic update checks. The npm server stores its local accounts, password hashes, hashed session identifiers, library permissions, favorites and watch history in its own data directory. Login does not contact a cloud identity service. Administrators manage access locally; they are trusted to control the server and can inspect its stored data. Favorites and watch history are separate for each account. Existing personal data is copied to the first administrator when accounts are initialized.
+
+New installations match filenames against Cinemeta during library scans and cache the returned metadata and artwork locally. Online matching and artwork downloads can be disabled independently by an administrator in Settings. Network access to the server requires an account, but HTTP does not encrypt traffic: use HTTPS or a trusted VPN on untrusted networks.
 
 ## Optional external requests
 

@@ -1,4 +1,5 @@
 import type { FolderEntry, HomeData, Library, MediaItem, PlaybackInfo, PlaybackQuality, ScanStatus, Settings, ShortsFeed } from './types';
+import type { Account, AuthStatus } from '../../src/auth-types';
 
 export interface QualityTranscodeState {
   status:string;
@@ -11,12 +12,13 @@ export interface QualityTranscodeState {
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const headers: Record<string, string> = { ...(init?.headers as Record<string,string> | undefined) };
+  const headers: Record<string, string> = { 'X-Virelo-Request':'1', ...(init?.headers as Record<string,string> | undefined) };
   if (init?.body) headers['Content-Type'] = 'application/json';
   const response = await fetch(url, { ...init, headers });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    throw new Error(body.error || `${response.status} ${response.statusText}`);
+    if (body.code === 'SESSION_REVOKED' || (response.status === 401 && !['/api/auth/login','/api/auth/setup'].includes(url))) window.dispatchEvent(new Event('virelo-auth-expired'));
+    throw new Error(body.message || body.error || `${response.status} ${response.statusText}`);
   }
   return response.json() as Promise<T>;
 }
@@ -28,6 +30,17 @@ function withQuery(url: string, params: Record<string, string | number | undefin
 }
 
 export const api = {
+  authStatus: () => request<AuthStatus>('/api/auth/status'),
+  signIn: (body: {username:string;password:string}) => request<AuthStatus>('/api/auth/login', {method:'POST',body:JSON.stringify(body)}),
+  setupAccount: (body: {username:string;displayName:string;password:string}) => request<AuthStatus>('/api/auth/setup', {method:'POST',body:JSON.stringify(body)}),
+  signOut: () => request('/api/auth/logout', {method:'POST'}),
+  updateAccount: (body: {username:string;displayName:string;currentPassword:string;password?:string}) => request<AuthStatus>('/api/auth/me', {method:'PATCH',body:JSON.stringify(body)}),
+  accounts: () => request<Account[]>('/api/accounts'),
+  accountLibraries: () => request<Library[]>('/api/accounts/libraries'),
+  saveAccount: (body: object, id?:number) => request<Account>(id === undefined ? '/api/accounts' : `/api/accounts/${id}`, {method:id === undefined?'POST':'PATCH',body:JSON.stringify(body)}),
+  deleteAccount: (id:number) => request(`/api/accounts/${id}`, {method:'DELETE'}),
+  accountSecurity: () => request<{adminLocalOnly:boolean;localAccess:boolean}>('/api/accounts/security'),
+  saveAccountSecurity: (adminLocalOnly:boolean) => request('/api/accounts/security', {method:'POST',body:JSON.stringify({adminLocalOnly})}),
   home: () => request<HomeData>('/api/home'),
   media: (params: Record<string,string|number|undefined> = {}) => request<MediaItem[]>(withQuery('/api/media', params)),
   mediaById: (id: number) => request<MediaItem>(`/api/media/${id}`),
@@ -53,7 +66,7 @@ export const api = {
   audioTranscodeStatus: (id:number,audioStream:number) => request<{status:string;error?:string;url:string}>(withQuery(`/api/media/${id}/audio/status`,{audioStream})),
   subtitleUrl: (id:number,stream:number) => `/api/media/${id}/subtitles/${stream}`,
   progress: (id:number, position:number, duration:number) => fetch(`/api/media/${id}/progress`, {
-    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({position,duration}), keepalive:true
+    method:'POST', headers:{'Content-Type':'application/json','X-Virelo-Request':'1'}, body:JSON.stringify({position,duration}), keepalive:true
   }).catch(()=>undefined)
 };
 

@@ -9,7 +9,8 @@ function parsePreference(value: string | null): QualityPreference | undefined {
   return Number.isInteger(height) && height > 0 ? height : undefined;
 }
 
-export function readQualityPreference(allowAuto: boolean): QualityPreference {
+export function readQualityPreference(allowAuto: boolean, allowConversion = true): QualityPreference {
+  if (!allowConversion) return 'source';
   let preference = sessionPreference;
   if (preference === undefined) {
     try {

@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import '@fontsource-variable/inter';
 import { SplashScreen } from './components/SplashScreen';
 import { router } from './router';
+import { AccountSession } from './components/AccountSession';
 import './styles.css';
 import './streaming-ui.css';
 
@@ -25,7 +26,7 @@ function App() {
 
   return (
     <>
-      <RouterProvider router={router} />
+      <AccountSession><RouterProvider router={router} /></AccountSession>
       {showSplash && <SplashScreen onDone={finishSplash} />}
     </>
   );

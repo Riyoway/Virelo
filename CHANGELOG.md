@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 — 2026-10-17
+
+Upgrade note: all server access now requires a local account. After upgrading, open Virelo directly on the server PC using localhost to create the first administrator. That account inherits existing favorites and watch history; media files are unchanged. Existing API clients must sign in and include `X-Virelo-Request: 1` for state-changing requests. The project is now AGPL-3.0-only; see LICENSE for the terms and preserved permissions for older MIT releases.
+
+- Require local accounts in the npm server. Add localhost-only first-administrator setup, sign-in/out, Account Manager, per-user library and action permissions, profile/password changes, administrator promotion, disabling/deletion, optional localhost-only administrator access and local CLI recovery. Isolate favorites and watch history, migrate legacy personal data to the first administrator, revoke sessions on account changes, and protect media, cached playback and artwork at the server boundary. Web-only Virelo is unchanged.
 
 - Add a visible eight-ray spark burst when saving a favorite from Shorts, the video player or title details. Keep playback and button layout stable, cancel interrupted effects, and use a gentle fade for reduced motion.
 

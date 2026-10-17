@@ -1,6 +1,7 @@
 import { readdir, rm, stat } from 'node:fs/promises';
 import { basename, dirname, extname, join, relative, resolve } from 'node:path';
 import type { VireloDB } from './db.js';
+import type { CatalogScope } from './auth-types.js';
 import type { Library, MediaKind, ScanStatus } from './types.js';
 import { makeThumbnail, probeMedia } from './ffmpeg.js';
 
@@ -122,8 +123,8 @@ export async function scanLibrary(db: VireloDB, library: Library, dataDir: strin
   db.deleteMissingForLibrary(library.id, existingPaths);
 }
 
-export async function scanAll(db: VireloDB, dataDir: string, status: ScanStatus) {
-  for (const library of db.visibleLibraries()) {
+export async function scanAll(db: VireloDB, dataDir: string, status: ScanStatus, scope?: CatalogScope) {
+  for (const library of db.visibleLibraries(scope)) {
     status.message = `Scanning ${library.label}`;
     await scanLibrary(db, library, dataDir, status);
   }

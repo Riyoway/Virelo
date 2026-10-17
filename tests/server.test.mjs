@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createVireloServer, startServer } from '../dist/server.js';
+import { authenticatedInjector } from './auth-helper.mjs';
 
 const packageMetadata = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 
@@ -24,7 +25,8 @@ test('clearing metadata through the API keeps the file, likes and progress', asy
     });
     db.setLike(media.id, true);
     db.setProgress(media.id, 30, 120);
-    const response = await app.inject({method:'DELETE',url:'/api/media/'+media.id+'/metadata'});
+    const inject = await authenticatedInjector(app);
+    const response = await inject({method:'DELETE',url:'/api/media/'+media.id+'/metadata'});
     assert.equal(response.statusCode, 200);
     const reset = response.json();
     assert.equal(reset.title, 'Arrival');
@@ -37,7 +39,7 @@ test('clearing metadata through the API keeps the file, likes and progress', asy
     assert.equal(reset.progress_position, 30);
     assert.equal(reset.metadata_blocked, 1);
     assert.equal(db.listMetadataCandidates(500, true).length, 0);
-    const missing = await app.inject({method:'DELETE',url:'/api/media/99999/metadata'});
+    const missing = await inject({method:'DELETE',url:'/api/media/99999/metadata'});
     assert.equal(missing.statusCode, 404);
   } finally {
     if (app) await app.close();
@@ -52,7 +54,8 @@ test('bulk metadata reset includes all libraries and preserves video and persona
     const server = await createVireloServer({dataDir,mediaPaths:[],host:'127.0.0.1',port:0});
     app = server.app;
     const db = server.db;
-    assert.deepEqual((await app.inject({method:'DELETE',url:'/api/metadata'})).json(), {cleared:0});
+    const inject = await authenticatedInjector(app);
+    assert.deepEqual((await inject({method:'DELETE',url:'/api/metadata'})).json(), {cleared:0});
     const items = [];
     for (const name of ['Arrival', 'Interstellar']) {
       const library = db.addLibrary(join(dataDir,name), name);
@@ -67,7 +70,7 @@ test('bulk metadata reset includes all libraries and preserves video and persona
       db.setProgress(media.id,30,120);
       items.push({media,name});
     }
-    const response = await app.inject({method:'DELETE',url:'/api/metadata'});
+    const response = await inject({method:'DELETE',url:'/api/metadata'});
     assert.equal(response.statusCode,200);
     assert.deepEqual(response.json(),{cleared:2});
     for (const {media,name} of items) {
@@ -84,7 +87,7 @@ test('bulk metadata reset includes all libraries and preserves video and persona
       assert.equal(db.getMedia(media.id).title,name);
     }
     assert.equal(db.listMetadataCandidates(500,true).length,0);
-    assert.deepEqual((await app.inject({method:'DELETE',url:'/api/metadata'})).json(),{cleared:2});
+    assert.deepEqual((await inject({method:'DELETE',url:'/api/metadata'})).json(),{cleared:2});
   } finally {
     if (app) await app.close();
     await rm(dataDir,{recursive:true,force:true});
@@ -115,7 +118,8 @@ test('health remains available when FFmpeg tools cannot be started', async () =>
       port: 41777,
       mediaPaths: [mediaDir]
     }));
-    const response = await app.inject({ method: 'GET', url: '/api/health' });
+    const inject = await authenticatedInjector(app);
+    const response = await inject({ method: 'GET', url: '/api/health' });
     assert.equal(response.statusCode, 200);
     assert.deepEqual(response.json(), {
       ok: true,

@@ -5,6 +5,7 @@ import { MobileNav } from './components/MobileNav';
 import { NotFoundView } from './views/NotFoundView';
 import type { SortKey } from './types';
 import { validateShortsSearch } from './utils/shorts-navigation';
+import { PlaybackAccess } from './components/AccountSession';
 
 const HomeRouteView = createRouteView(() => import('./views/HomeView'), 'HomeView', 'home');
 const FavoritesRouteView = createRouteView(() => import('./views/FavoritesView'), 'FavoritesView', 'library');
@@ -52,9 +53,9 @@ const indexRoute = createRoute({ getParentRoute:()=>rootRoute, path:'/', compone
 const libraryRoute = createRoute({ getParentRoute:()=>rootRoute, path:'/library', component:LibraryRouteView });
 const favoritesRoute = createRoute({ getParentRoute:()=>rootRoute, path:'/favorites', component:FavoritesRouteView });
 const settingsRoute = createRoute({ getParentRoute:()=>rootRoute, path:'/settings', component:SettingsRouteView });
-const watchRoute = createRoute({ getParentRoute:()=>rootRoute, path:'/watch/$mediaId', component:WatchRouteView, validateSearch: validateWatchSearch });
+const watchRoute = createRoute({ getParentRoute:()=>rootRoute, path:'/watch/$mediaId', component:()=> <PlaybackAccess><WatchRouteView/></PlaybackAccess>, validateSearch: validateWatchSearch });
 const detailRoute = createRoute({ getParentRoute:()=>rootRoute, path:'/title/$mediaId', component:DetailRouteView });
-const shortsRoute = createRoute({ getParentRoute:()=>rootRoute, path:'/shorts', component:ShortsRouteView, validateSearch:validateShortsSearch });
+const shortsRoute = createRoute({ getParentRoute:()=>rootRoute, path:'/shorts', component:()=> <PlaybackAccess><ShortsRouteView/></PlaybackAccess>, validateSearch:validateShortsSearch });
 const routeTree = rootRoute.addChildren([indexRoute, libraryRoute, favoritesRoute, settingsRoute, watchRoute, detailRoute, shortsRoute]);
 export const router = createRouter({
   routeTree, defaultPreload: 'intent', scrollRestoration: true,
