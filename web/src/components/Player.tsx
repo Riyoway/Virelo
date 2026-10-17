@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowsOut, FastForward, Pause, PictureInPicture, Play, Repeat, Rewind, SkipBack, SkipForward, SpeakerHigh, SpeakerSlash, SpinnerGap } from '@phosphor-icons/react';
+import { ArrowsOut, FastForward, Pause, PictureInPicture, Play, Repeat, Rewind, SkipBack, SkipForward, SpeakerHigh, SpeakerSlash, SpinnerGap, SlidersHorizontal } from '@phosphor-icons/react';
 import { api } from '../api';
 import { useHlsFallback } from '../hooks/useHlsFallback';
 import { useAdaptiveQuality } from '../hooks/useAdaptiveQuality';
@@ -15,8 +15,11 @@ import { PlayerActionMenu } from './PlayerActionMenu';
 import { type RepeatMode } from '../utils/playback-repeat';
 import { useBackgroundPlayback } from '../hooks/useBackgroundPlayback';
 import { usePlaybackVolume } from '../hooks/usePlaybackVolume';
+import { useVideoPresentation } from '../hooks/useVideoPresentation';
+import { VideoSettingsMenu } from './VideoSettingsMenu';
 import type { MediaItem, PlaybackInfo } from '../types';
 import '../player-ui.css';
+import '../video-settings.css';
 
 interface PlayerProps {
   item: MediaItem;
@@ -43,6 +46,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
   const [playRequested, setPlayRequested] = useState(Boolean(autoPlay));
   const audioRef = useRef<HTMLAudioElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const presentation = useVideoPresentation(item.id, containerRef);
   const lastProgress = useRef(0);
   const playbackItemId = useRef(item.id);
   const controlsTimer = useRef<number | null>(null);
@@ -630,6 +634,8 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
     onDoubleClick={()=>void fullscreen()} onPointerMove={(event)=>{if(event.pointerType==='mouse'){revealControls();scheduleControlsHide();}}} onPointerDown={revealControls} onPointerUp={scheduleControlsHide} onPointerCancel={scheduleControlsHide} onPointerLeave={scheduleControlsHide} onFocusCapture={revealControls} onBlurCapture={scheduleControlsHide}
     onKeyDown={event=>{revealControls();scheduleControlsHide();if(event.target===event.currentTarget&&(event.key==='ContextMenu'||(event.shiftKey&&event.key==='F10'))){event.preventDefault();const bounds=event.currentTarget.getBoundingClientRect();setContextPosition({x:bounds.left+24,y:bounds.top+24,keyboard:true});}}}>
     <video
+      className="video-presentation"
+      style={presentation.style}
       ref={videoRef}
       src={`/api/media/${item.id}/stream`}
       playsInline
@@ -699,6 +705,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
         </div>
         <div className="player-tools">
         <FavoriteButton item={item} iconOnly />
+        <VideoSettingsMenu key={item.id + ':presentation'} settings={presentation.settings} onChange={presentation.update} onReset={presentation.reset} />
         {playbackInfo&&<PlaybackSettingsMenu key={item.id}
           audioTracks={playbackInfo.audioTracks}
           subtitleTracks={playbackInfo.subtitleTracks}
@@ -726,6 +733,7 @@ export function Player({item,queue,queueIndex,onEnded,onNext,onPrev,canGoNext=tr
         {label:'Fast-forward 10 seconds',icon:<FastForward/>,action:()=>seekBy(10)},
         {label:muted?'Unmute':'Mute',icon:muted?<SpeakerSlash/>:<SpeakerHigh/>,action:toggleMute},
         {label:'Repeat video',icon:<Repeat/>,checked:repeat==='one',action:()=>changeRepeat(repeat==='one'?'off':'one')},
+        {label:'Video settings',icon:<SlidersHorizontal/>,action:()=>containerRef.current?.querySelector<HTMLButtonElement>('[data-setting="video"]')?.click()},
         ...(['audio','subtitles'] as const).filter(setting=>containerRef.current?.querySelector(`[data-setting="${setting}"]`)).map(setting=>({
           label:setting==='audio'?'Audio':'Subtitles',action:()=>containerRef.current?.querySelector<HTMLButtonElement>(`[data-setting="${setting}"]`)?.click()
         })),

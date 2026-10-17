@@ -72,6 +72,7 @@ npx virelo --media "C:\Users\You\Videos" --random-port
 | --- | --- | --- |
 | 📚 | **Library** | Recursive scanning, folders, search, and sorting. |
 | ▶️ | **Playback** | Range streaming, seeking, watch progress, and queue controls. |
+| 🎛️ | **Video settings** | Fit or crop to fill, rotate in 90° steps, and adjust brightness, contrast and saturation without modifying files or changing quality. |
 | 📱 | **Shorts** | A vertical feed for portrait videos with swipe-friendly controls. |
 | 💜 | **Favorites** | Save videos and Shorts with the heart; browse every saved item in Favorites. |
 | 🖼️ | **Artwork** | Automatic movie and series metadata, posters, backdrops, and episode images. |

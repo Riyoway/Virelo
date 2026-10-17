@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import { spawn, execFileSync } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
@@ -219,6 +219,141 @@ try {
   assert.equal(await page.locator('.player-tools .favorite-icon svg').evaluate(icon => icon.getBoundingClientRect().width), 22);
   assert.equal(await page.locator('.player-tools .favorite-icon').evaluate(icon => getComputedStyle(icon).transform), 'none');
   console.log(mode + ': saving from the player does not interrupt playback or change heart sizing');
+  if (process.env.VIRELO_TEST_BUILT_CSS === '1') {
+    const dist = join(repo, mode === 'npm' ? 'dist/web' : 'dist');
+    const assets = (await readdir(join(dist, 'assets'))).filter(name => /^(index|WatchView)-.*\.css$/.test(name));
+    assert.ok(assets.length >= 2, 'build before auditing production player CSS');
+    const css = (await Promise.all(assets.map(name => readFile(join(dist, 'assets', name), 'utf8')))).join('\n');
+    await page.evaluate(css => {
+      window.__displayStyles = Array.from(document.querySelectorAll('style,link[rel="stylesheet"]'));
+      window.__displayStyles.forEach(node => node.remove());
+      const style = document.createElement('style'); style.id = 'display-production-css'; style.textContent = css;
+      document.head.append(style);
+    }, css);
+  }
+  // Check the real Player: presentation changes must not reload or pause its source.
+  const displayButton = page.getByRole('button', { name: 'Video settings', exact: true });
+  const displayMenu = page.getByRole('dialog', { name: 'Video settings', exact: true });
+  const beforeDisplay = await video.evaluate(element => {
+    window.__loads = 0; element.addEventListener('loadstart', () => window.__loads++);
+    return { src: element.currentSrc, time: element.currentTime };
+  });
+  await displayButton.click();
+  await displayMenu.waitFor();
+  const option = name => displayMenu.getByRole('button', { name, exact: true });
+  const rotation = () => displayMenu.getByRole('status', { name: 'Rotation', exact: true }).textContent();
+  assert.equal(await option('Fit').getAttribute('aria-pressed'), 'true');
+  assert.equal(await option('Reset adjustments').isDisabled(), true);
+  await option('Fill').click();
+  assert.equal(await video.evaluate(element => getComputedStyle(element).objectFit), 'cover');
+  for (const angle of [90, 180, 270, 0]) {
+    await option('Rotate clockwise').click();
+    assert.equal(await rotation(), angle + '°');
+    assert.equal(await video.evaluate(element => {
+      const box = element.getBoundingClientRect(), player = element.closest('.player').getBoundingClientRect();
+      return ['x', 'y', 'width', 'height'].every(key => Math.abs(box[key] - player[key]) < 1);
+    }), true, 'rotation preserves player geometry');
+  }
+  await option('Rotate counterclockwise').click();
+  assert.equal(await rotation(), '270°');
+  for (const [label, value] of [['Brightness', 120], ['Contrast', 90], ['Saturation', 75]]) {
+    await displayMenu.getByRole('slider', { name: label, exact: true }).evaluate((input, value) => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, String(value));
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }, value);
+  }
+  assert.equal(await video.evaluate(element => getComputedStyle(element).filter), 'brightness(1.2) contrast(0.9) saturate(0.75)');
+  assert.equal(await page.locator('.player-controls').evaluate(element => getComputedStyle(element).filter), 'none');
+  await displayMenu.getByRole('slider', { name: 'Brightness', exact: true }).focus();
+  await page.keyboard.press('ArrowLeft');
+  assert.equal(await displayMenu.getByRole('slider', { name: 'Brightness', exact: true }).inputValue(), '119');
+  await displayMenu.getByRole('heading', { name: 'Video settings' }).dblclick();
+  assert.equal(await page.evaluate(() => Boolean(document.fullscreenElement)), false);
+  await page.waitForTimeout(2600); // Exercise the controls auto-hide timer while settings are open.
+  assert.equal(await page.locator('.player').evaluate(element => element.classList.contains('controls-visible')), true);
+  assert.equal(await video.evaluate(element => element.paused), false);
+  assert.equal(await video.evaluate(element => element.currentSrc), beforeDisplay.src);
+  assert.ok(await video.evaluate(element => element.currentTime) >= beforeDisplay.time);
+  assert.equal(await page.evaluate(() => window.__loads), 0);
+  assert.equal(await page.evaluate(() => window.__pauses), 0);
+  await page.keyboard.press('Escape');
+  await displayMenu.waitFor({ state: 'hidden' });
+  assert.equal(await displayMenu.count(), 0);
+  assert.equal(await displayButton.evaluate(element => element === document.activeElement), true);
+  await page.keyboard.press('ArrowDown');
+  await displayMenu.waitFor();
+  assert.equal(await displayMenu.getAttribute('data-animate'), 'false');
+  await option('Reset adjustments').click();
+  assert.equal(await video.evaluate(element => getComputedStyle(element).filter), 'none');
+  assert.equal(await video.evaluate(element => getComputedStyle(element).objectFit), 'contain');
+  assert.equal(await rotation(), '0°');
+  await page.keyboard.press('Escape');
+  await video.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Video settings', exact: true }).click();
+  await displayMenu.waitFor();
+  await option('Close video settings').click();
+  await displayButton.focus();
+  await page.keyboard.press('Enter');
+  await option('Fill').focus();
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Tab');
+  assert.equal(await page.evaluate(() => document.activeElement.getAttribute('aria-label')), 'Rotate clockwise');
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Fullscreen', exact: true }).click();
+  await page.waitForFunction(() => Boolean(document.fullscreenElement));
+  await displayButton.click();
+  await displayMenu.waitFor();
+  assert.equal(await displayMenu.evaluate(element => document.fullscreenElement.contains(element)), true);
+  await option('Rotate clockwise').click();
+  assert.equal(await video.evaluate(element => {
+    const box = element.getBoundingClientRect(), player = element.closest('.player').getBoundingClientRect();
+    return Math.abs(box.width - player.width) < 1 && Math.abs(box.height - player.height) < 1;
+  }), true);
+  await page.evaluate(() => document.exitFullscreen());
+  await displayMenu.waitFor({ state: 'hidden' });
+  for (const viewport of [{ width: 320, height: 780 }, { width: 844, height: 390 }, { width: 320, height: 240 }]) {
+    await page.setViewportSize(viewport);
+    await displayButton.click();
+    await displayMenu.waitFor();
+    await page.waitForTimeout(220); // Measure after the existing 180ms entry transition.
+    const bounds = await displayMenu.boundingBox();
+    assert.ok(bounds.x >= 7 && bounds.y >= 7 && bounds.x + bounds.width <= viewport.width - 7
+      && bounds.y + bounds.height <= viewport.height - 7, JSON.stringify({ viewport, bounds }));
+    assert.equal(await displayMenu.evaluate(element => getComputedStyle(element).backdropFilter.includes('blur')), true);
+    assert.equal(await displayMenu.locator('.video-settings-content').evaluate(element => getComputedStyle(element).scrollbarWidth), 'none');
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
+    await option('Close video settings').click();
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await displayButton.click();
+  assert.equal(await displayMenu.evaluate(element => getComputedStyle(element).transitionProperty), 'opacity');
+  await page.screenshot({ path: join(repo, 'node_modules/.cache/video-settings-' + mode + '.png') });
+  assert.equal(await displayMenu.locator('.video-settings-content').evaluate(element => element.scrollHeight <= element.clientHeight + 1), true, 'desktop popup fits without scrolling');
+  await page.keyboard.press('Escape');
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  // Queue changes reuse Player: even revisiting an adjusted item must start with default presentation.
+  await page.evaluate(prefix => window.__router.navigate({ to: prefix + '/watch/7', search: { queue: true } }), prefix);
+  await displayButton.click();
+  await option('Fill').click();
+  await option('Rotate clockwise').click();
+  await option('Close video settings').click();
+  await page.getByRole('button', { name: 'Next video', exact: true }).click();
+  await displayButton.click();
+  assert.equal(await option('Fit').getAttribute('aria-pressed'), 'true');
+  assert.equal(await rotation(), '0°');
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Previous video', exact: true }).click();
+  await displayButton.click();
+  assert.equal(await option('Reset adjustments').isDisabled(), true);
+  await page.keyboard.press('Escape');
+  console.log(mode + ': video fit, rotation, colors, reset, queue isolation, keyboard, fullscreen and mobile pass');
+  if (process.env.VIRELO_TEST_BUILT_CSS === '1') {
+    await page.evaluate(() => {
+      document.getElementById('display-production-css')?.remove();
+      window.__displayStyles.forEach(node => document.head.append(node));
+    });
+  }
 
   await navigate('/favorites');
   await page.getByRole('heading', { name: 'Favorites', exact: true }).waitFor();
